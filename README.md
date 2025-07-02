@@ -1,4 +1,8 @@
-# Curvine
+<div align=center>
+<img src="https://raw.githubusercontent.com/CurvineIO/curvine-doc/refs/heads/main/static/img/curvine_logo.svg",  width="92" height="100">
+
+<img src="https://raw.githubusercontent.com/CurvineIO/curvine-doc/refs/heads/main/static/img/curvine_font_dark.svg" width="300" height="100">
+</div>
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange)](https://www.rust-lang.org)
@@ -108,3 +112,8 @@ Curvine performs excellently in high-concurrency scenarios and supports:
 - High-throughput data read and write
 - Low-latency operations
 - Large-scale concurrent connections
+
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=CurvineIO/curvine&type=Date)](https://www.star-history.com/#CurvineIO/curvine&Date)
