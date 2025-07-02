@@ -1,6 +1,6 @@
 <div align=center>
 <img src="https://raw.githubusercontent.com/CurvineIO/curvine-doc/refs/heads/main/static/img/curvine_logo.svg",  width="92" height="100">
-
+<br>
 <img src="https://raw.githubusercontent.com/CurvineIO/curvine-doc/refs/heads/main/static/img/curvine_font_dark.svg" width="300" height="100">
 </div>
 
