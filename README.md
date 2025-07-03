@@ -10,9 +10,6 @@
 
 **Curvine** is a high-performance, concurrent distributed cache system written in Rust, designed for low-latency and high-throughput workloads.
 
-## 📜 License
-Curvine is licensed under the ​**​[Apache License 2.0](LICENSE)​**.
-
 ## 📚 Documentation Resources
 
 For more detailed information, please refer to:
@@ -22,18 +19,14 @@ For more detailed information, please refer to:
 - [User Manuals](https://curvineio.github.io/docs/category/user-manuals)
 - [Benchmark](https://curvineio.github.io/docs/category/benchmark)
 
+## Use Case
+![use_case](https://raw.githubusercontent.com/CurvineIO/curvine-doc/refs/heads/main/docs/1-Overview/img/curvine-scene.jpg)
 
-## 🧩 Modular Architecture
-Curvine adopts a modular design and is mainly composed of the following core components：
-
-- **orpc**: A high-performance network communication framework that supports asynchronous RPC calls.
-- **curvine-common**: A shared library containing protocol definitions, error handling, and common utilities.
-- **curvine-server**: A server component that includes Master and Worker implementations.
-- **curvine-client**: A client library that provides APIs for interacting with the server.
-- **curvine-fuse**: A FUSE file system interface that allows Curvine to be mounted as a local file system.
-- **curvine-libsdk**: An SDK library that supports multi - language access.
-- **curvine-web**: A web management interface and API.
-- **curvine-tests**: A testing framework and performance benchmarking tool.
+- **Case1**: Shuffle acceleration
+- **Case2**: Hot table data acceleration
+- **Case3**: Training acceleration
+- **Case4**: Model distribution
+- **Case5**: Multi-cloud data caching
 
 
 ## 🚀 Core Features
@@ -46,6 +39,18 @@ Curvine adopts a modular design and is mainly composed of the following core com
 - **Raft Consensus**: Uses the Raft algorithm to ensure data consistency and high availability.
 - **Monitoring and Metrics**: Built - in monitoring and performance metric collection.
 - **Web Interface**: Provides a web management interface for convenient system monitoring and management.
+
+## 🧩 Modular Architecture
+Curvine adopts a modular design and is mainly composed of the following core components：
+
+- **orpc**: A high-performance network communication framework that supports asynchronous RPC calls.
+- **curvine-common**: A shared library containing protocol definitions, error handling, and common utilities.
+- **curvine-server**: A server component that includes Master and Worker implementations.
+- **curvine-client**: A client library that provides APIs for interacting with the server.
+- **curvine-fuse**: A FUSE file system interface that allows Curvine to be mounted as a local file system.
+- **curvine-libsdk**: An SDK library that supports multi - language access.
+- **curvine-web**: A web management interface and API.
+- **curvine-tests**: A testing framework and performance benchmarking tool.
 
 ## 📦 System Requirements
 
@@ -114,6 +119,8 @@ Curvine performs excellently in high-concurrency scenarios and supports:
 - Low-latency operations
 - Large-scale concurrent connections
 
+## 📜 License
+Curvine is licensed under the ​**​[Apache License 2.0](LICENSE)​**.
 
 ## Star History
 
