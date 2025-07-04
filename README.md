@@ -58,15 +58,34 @@ Curvine adopts a modular design and is mainly composed of the following core com
 - Linux or macOS (Limited support on Windows)
 - FUSE library (for file system functionality)
 
-## ⚙️ Installation and Configuration
+## 🛠 Build Instructions
 
-Build from source:
+This project requires the following dependencies. Please ensure they are installed before proceeding:
+
+### 📋 Prerequisites
+
+- ​**Rust**: version 1.80 or later ([Installation Guide](https://www.rust-lang.org/tools/install))
+- ​**Protobuf**: version 2.x ([v2.7.2 recommended](https://github.com/protocolbuffers/protobuf/releases/tag/v2.7.2))
+- ​**Maven**: version 3.8 or later ([Install Guide](https://maven.apache.org/install.html))
+- ​**LLVM**: version 12 or later ([Installation Guide](https://llvm.org/docs/GettingStarted.html))
+- ​**FUSE**: libfuse2 or libfuse3 development packages
+- ​**JDK**: version 1.8 or later (OpenJDK or Oracle JDK)
+- ​**npm**: version 9 or later ([Node.js Installation](https://nodejs.org/))
+
+You can either:
+1. Use the pre-configured `curvine-docker/compile/Dockerfile_rocky9` to build a compilation image
+2. Reference this Dockerfile to create a compilation image for other operating system versions
+
+### 🚀 Build Steps (Linux - Ubuntu/Debian example)
+
 ```bash
 # Compiled files are in build/dist
 sh build/build.sh
 ```
 
-Start a single - node cluster:
+After successful compilation, target file will be generated in the build/dist directory. This file is the Curvine installation package that can be used for deployment or building images.
+
+### Start a single - node cluster
 ```bash
 cd build/dist
 
@@ -77,7 +96,7 @@ bin/curvine-master.sh start
 bin/curvine-worker.sh start
 ```
 
-Mount the file system:
+Mount the file system
 ```bash
 # The default mount point is /curvine-fuse
 bin/curvine-fuse.sh start
