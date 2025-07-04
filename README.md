@@ -85,7 +85,7 @@ sh build/build.sh
 
 After successful compilation, target file will be generated in the build/dist directory. This file is the Curvine installation package that can be used for deployment or building images.
 
-### Start a single - node cluster
+### 🖥️  Start a single - node cluster
 ```bash
 cd build/dist
 
@@ -111,6 +111,11 @@ Access the file system using compatible HDFS commands:
 ```bash
 bin/curvine fs -mkdir /a
 bin/curvine fs -ls /
+```
+
+Access Web UI：
+```
+http://your-hostname:9000
 ```
 
 Curvine uses TOML - formatted configuration files. An example configuration is located at conf/curvine-cluster.toml. The main configuration items include:
