@@ -70,7 +70,7 @@ let rt = Arc::new(conf.client_rpc_conf().create_runtime());
 let fs = CurvineFileSystem::with_rt(conf, rt)?;
 
 let path = Path::from_str("/dir")?;
-fs.mkdir().await?;
+fs.mkdir(&path).await?;
 ```
 
 ### 📌 FUSE (Filesystem in Userspace)
