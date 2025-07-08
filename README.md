@@ -63,9 +63,10 @@ Curvine adopts a modular design and is mainly composed of the following core com
 ```
 use curvine_common::conf::ClusterConf;
 use curvine_common::fs::Path;
+use std::sync::Arc;
 
 let conf = ClusterConf::from(conf_path);
-let rt = conf.client_rpc_conf().create_runtime();
+let rt = Arc::new(conf.client_rpc_conf().create_runtime());
 let fs = CurvineFileSystem::with_rt(conf, rt)?;
 
 let path = Path::from_str("/dir")?;
@@ -78,6 +79,9 @@ ls /curvine-fuse
 ```
 ### 🐘 Hadoop Compatible API
 ```
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.*;
+
 Configuration conf = new Configuration();
 conf.set("fs.cv.impl", "io.curvine.CurvineFileSystem");
 
