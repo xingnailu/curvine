@@ -58,6 +58,33 @@ Curvine adopts a modular design and is mainly composed of the following core com
 - Linux or macOS (Limited support on Windows)
 - FUSE library (for file system functionality)
 
+## 🗂️ Cached File System Access
+### 1. 🦀 Rust API (Recommended for Native Integration)
+```
+use curvine_common::conf::ClusterConf;
+use curvine_common::fs::Path;
+
+let conf = ClusterConf::from(conf_path);
+let rt = conf.client_rpc_conf().create_runtime();
+let fs = CurvineFileSystem::with_rt(conf, rt)?;
+
+let path = Path::from_str("/dir")?;
+fs.mkdir().await?;
+```
+
+### 📌 FUSE (Filesystem in Userspace)
+```
+ls /curvine-fuse
+```
+### 🐘 Hadoop Compatible API
+```
+Configuration conf = new Configuration();
+conf.set("fs.cv.impl", "io.curvine.CurvineFileSystem");
+
+FileSystem fs = FileSystem.get(URI.create("cv://master:8995"), conf);
+FSDataInputStream in = fs.open(new Path("/user/test/file.txt"));
+```
+
 ## 🛠 Build Instructions
 
 This project requires the following dependencies. Please ensure they are installed before proceeding:
