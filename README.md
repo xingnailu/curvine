@@ -59,7 +59,7 @@ Curvine adopts a modular design and is mainly composed of the following core com
 - FUSE library (for file system functionality)
 
 ## 🗂️ Cached File System Access
-### 1. 🦀 Rust API (Recommended for Native Integration)
+### 🦀 Rust API (Recommended for Native Integration)
 ```
 use curvine_common::conf::ClusterConf;
 use curvine_common::fs::Path;
