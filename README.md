@@ -78,6 +78,16 @@ fs.mkdir(&path).await?;
 ```
 ls /curvine-fuse
 ```
+
+**Officially Supported Linux Distributions**​
+
+| OS Distribution   | Kernel Requirement      | Tested Version       | Dependencies                 |
+|--------------------|-------------------------|----------------------|------------------------------|
+| ​**CentOS 7**​       | ≥3.10.0                | 7.6                   | fuse2-2.9.2   |
+| ​**CentOS 8**​       | ≥4.18.0                 | 8.5                  | fuse3-3.9.1                  |
+| ​**Rocky Linux 9**​  | ≥5.14.0                 | 9.5                  | fuse3-3.10.2                 |
+| ​**RHEL 9**​         | ≥5.14.0                 | 9.5                  | fuse3-3.10.2            |
+
 ### 🐘 Hadoop Compatible API
 ```
 import org.apache.hadoop.conf.Configuration;
