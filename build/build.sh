@@ -38,7 +38,7 @@ get_arch_name() {
 }
 
 get_os_version() {
-  id=$(grep ^ID= /etc/os-release | cut -d '"' -f 2)
+  id=$(grep -E '^ID=' /etc/os-release | cut -d= -f2- | tr -d '"')
   ver=$(grep ^VERSION_ID= /etc/os-release | cut -d '"' -f 2| cut -d '.' -f 1)
   echo $id$ver
 }

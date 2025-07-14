@@ -220,8 +220,8 @@ impl fs::FileSystem for CurvineFileSystem {
         };
 
         let out = fuse_init_out {
-            major: FUSE_KERNEL_VERSION,
-            minor: FUSE_KERNEL_MINOR_VERSION,
+            major: op.arg.major,
+            minor: op.arg.minor,
             max_readahead: op.arg.max_readahead,
             flags: op.arg.flags | out_flags,
             max_background: self.conf.max_background,

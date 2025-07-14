@@ -52,10 +52,6 @@ pub struct fuse_init_in {
     pub minor: u32,
     pub max_readahead: u32,
     pub flags: u32,
-    #[cfg(feature = "fuse3")]
-    pub flags2: u32,
-    #[cfg(feature = "fuse3")]
-    pub unused: u32,
 }
 
 #[repr(C)]
