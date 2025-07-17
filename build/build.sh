@@ -62,15 +62,15 @@ if [[ -z "${GIT_VERSION}" ]]; then
   GIT_VERSION=unknown
 fi
 
-# Package Directory
-DIST_DIR="$FS_HOME/build/dist"
-DIST_ZIP=curvine.zip
-
 # Get the necessary environment parameters
 ARCH_NAME=$(get_arch_name)
 OS_VERSION=$(get_os_version)
 FUSE_VERSION=$(get_fuse_version)
+CURVINE_VERSION=$(grep '^version =' "$FS_HOME/Cargo.toml" | sed 's/^version = "\(.*\)"/\1/')
 
+# Package Directory
+DIST_DIR="$FS_HOME/build/dist/"
+DIST_ZIP=curvine-${CURVINE_VERSION}-${ARCH_NAME}-${OS_VERSION}.zip
 
 # Process command parameters
 PROFILE=$1
@@ -118,6 +118,7 @@ mv "$FS_HOME"/curvine-web/webui/dist "$DIST_DIR"/webui
 echo "commit=$GIT_VERSION" > "$DIST_DIR"/build-version
 echo "os=${OS_VERSION}_$ARCH_NAME" >> "$DIST_DIR"/build-version
 echo "fuse=$FUSE_VERSION" >> "$DIST_DIR"/build-version
+echo "version=$CURVINE_VERSION" >> "$DIST_DIR"/build-version
 
 chmod +x "$DIST_DIR"/bin/*
 

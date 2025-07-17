@@ -20,6 +20,11 @@ members = [
     "curvine-web",
     "curvine-ufs", "curvine-cli"]
 
+[workspace.package]
+version = "0.1.1-beta"
+edition = "2021"
+license = "Apache-2.0"
+
 [workspace.dependencies]
 orpc = { path = "orpc" }
 curvine-common = { path = "curvine-common" }
