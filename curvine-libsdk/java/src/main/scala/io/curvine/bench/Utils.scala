@@ -86,6 +86,4 @@ object Utils {
     crc32.update(bytes, 0, bytes.length)
     crc32.getValue
   }
-
-
 }

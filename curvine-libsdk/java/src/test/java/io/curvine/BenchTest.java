@@ -30,10 +30,9 @@ public class BenchTest {
         System.setProperty("java.library.path", useDir + "/../../target/debug");
         System.setProperty("curvine.conf.dir", useDir + "/../../etc");
 
-        //System.setProperty("fs.curvine.master_addrs", "localhost:1001,localhost:2001,localhost:3001");
-        System.setProperty("fs.curvine.log_level", "debug");
-        // System.setProperty("fs.curvine.client_hostname", "localhost");
-        System.setProperty("fs.curvine.read_parallel", "4");
+        System.setProperty("fs.cv.master_addrs", "localhost:60705");
+        System.setProperty("fs.cv.log_level", "debug");
+        // System.setProperty("fs.cv.client_hostname", "localhost");
     }
 
     @Test
@@ -54,20 +53,22 @@ public class BenchTest {
 
     @Test
     public void benchV2() {
-        String useDir = System.getProperty("user.dir");
-
         String userNIO = "true";
         String[] writerArgs = {
                 "-action", "fs.write",
                 "-useNIO", userNIO,
-                "-dataDir", "/target/bench"
+                "-dataDir", "/target/bench",
+                "-fileNum", "1",
+                "-fileSize", "10MB",
         };
         CurvineBenchV2.main(writerArgs);
 
         String[] readArgs = {
                 "-action", "fs.read",
                 "-useNIO", userNIO,
-                "-dataDir", "/target/bench"
+                "-dataDir", "/target/bench",
+                "-fileNum", "1",
+                "-fileSize", "10MB",
         };
         CurvineBenchV2.main(readArgs);
     }

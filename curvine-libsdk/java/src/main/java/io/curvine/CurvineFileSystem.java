@@ -42,6 +42,8 @@ public class CurvineFileSystem extends FileSystem {
     private URI uri;
 
     private int writeChunkSize;
+    private int writeChunkNum;
+
     public final static String SCHEME = "cv";
 
     @Override
@@ -79,6 +81,7 @@ public class CurvineFileSystem extends FileSystem {
 
         StorageSize size = StorageSize.parse(filesystemConf.write_chunk_size);
         this.writeChunkSize = (int) size.getUnit().toBytes(size.getValue());
+        this.writeChunkNum = filesystemConf.write_chunk_num;
     }
 
     private String formatPath(Path path) {
@@ -103,7 +106,7 @@ public class CurvineFileSystem extends FileSystem {
             Progressable progress
     ) throws IOException {
         long nativeHandle = this.libFs.create(formatPath(path), overwrite);
-        CurvineOutputStream output = new CurvineOutputStream(libFs, nativeHandle, 0, writeChunkSize);
+        CurvineOutputStream output = new CurvineOutputStream(libFs, nativeHandle, 0, writeChunkSize, writeChunkNum);
         return new FSDataOutputStream(output, statistics);
     }
 
@@ -111,7 +114,7 @@ public class CurvineFileSystem extends FileSystem {
     public FSDataOutputStream append(Path path, int bufferSize, Progressable progress) throws IOException {
         long[] tmp = new long[] {0};
         long nativeHandle = this.libFs.append(formatPath(path), tmp);
-        CurvineOutputStream output = new CurvineOutputStream(libFs, nativeHandle, tmp[0], writeChunkSize);
+        CurvineOutputStream output = new CurvineOutputStream(libFs, nativeHandle, tmp[0], writeChunkSize, writeChunkNum);
         return new FSDataOutputStream(output, statistics, output.pos());
     }
 

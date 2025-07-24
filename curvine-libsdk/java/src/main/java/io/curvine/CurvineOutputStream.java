@@ -28,15 +28,27 @@ public class CurvineOutputStream extends OutputStream implements Syncable {
     private final CurvineFsMount libFs;
     private boolean closed;
 
-    private ByteBuffer buffer;
+    private ByteBuffer[] buffer;
 
     private long pos = 0;
 
-    public CurvineOutputStream(CurvineFsMount libFs, long nativeHandle, long pos, int bufferSize) {
+    private int bufIndex = 0;
+
+    public CurvineOutputStream(
+            CurvineFsMount libFs,
+            long nativeHandle,
+            long pos,
+            int chunk_size,
+            int chunk_num
+    ) {
         this.libFs = libFs;
         this.nativeHandle = nativeHandle;
         this.oneByte = new byte[1];
-        this.buffer = CurvineNative.createBuffer(bufferSize);
+
+        this.buffer = new ByteBuffer[chunk_num];
+        for (int i = 0; i < chunk_num; i++) {
+            this.buffer[i] = CurvineNative.createBuffer(chunk_size);
+        }
         this.pos = pos;
     }
 
@@ -59,6 +71,22 @@ public class CurvineOutputStream extends OutputStream implements Syncable {
         write(buf, 0, buf.length);
     }
 
+    protected ByteBuffer getBuffer() throws IOException {
+        if (!buffer[bufIndex].hasRemaining()) {
+            flushBuffer();
+
+            // select next buffer
+            if (bufIndex == buffer.length - 1) {
+                libFs.flush(nativeHandle);
+                bufIndex = 0;
+            } else {
+                bufIndex++;
+            }
+            buffer[bufIndex].clear();
+        }
+        return buffer[bufIndex];
+    }
+
     @Override
     public void write(@Nonnull byte[] buf, int offset, int length) throws IOException {
         checkClosed();
@@ -71,12 +99,9 @@ public class CurvineOutputStream extends OutputStream implements Syncable {
         }
 
         while (length > 0) {
-            if (!buffer.hasRemaining()) {
-               flushBuffer();
-            }
-
-            int writeLen = Math.min(length, buffer.remaining());
-            buffer.put(buf, offset, writeLen);
+            ByteBuffer curBuf = getBuffer();
+            int writeLen = Math.min(length, curBuf.remaining());
+            curBuf.put(buf, offset, writeLen);
             offset += writeLen;
             length -= writeLen;
             pos += writeLen;
@@ -85,9 +110,8 @@ public class CurvineOutputStream extends OutputStream implements Syncable {
 
 
     private void flushBuffer() throws IOException {
-        if (buffer.position() > 0) {
-            libFs.write(nativeHandle, buffer);
-            buffer.clear();
+        if (buffer[bufIndex].position() > 0) {
+            libFs.write(nativeHandle, buffer[bufIndex]);
         }
     }
 

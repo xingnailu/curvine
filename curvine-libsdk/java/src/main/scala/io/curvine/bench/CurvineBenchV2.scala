@@ -109,12 +109,11 @@ class CurvineBenchV2(params: BenchParams) {
     list
   }
 
-  def createAllWriter(): ListBuffer[(DataOutputStream, Array[Byte])] = {
-    val list = ListBuffer[(DataOutputStream, Array[Byte])]()
+  def createAllWriter(): ListBuffer[(DataOutputStream, Array[Array[Byte]])] = {
+    val list = ListBuffer[(DataOutputStream, Array[Array[Byte]])]()
     0.until(params.fileNum).foreach(index => {
-      val bytes = RandomStringUtils.randomAscii(params.bufferSize).getBytes
       val start = System.currentTimeMillis()
-      list.append((createWriter(index), bytes))
+      list.append((createWriter(index), create_write_bytes()))
       LOGGER.info(s"create writer $index cost ${System.currentTimeMillis() - start} ms")
     })
 
@@ -129,16 +128,28 @@ class CurvineBenchV2(params: BenchParams) {
     Utils.bytesToString(totalLen.longValue())
   }
 
-  def runWrite(writers: ListBuffer[(DataOutputStream, Array[Byte])]): Unit = {
+  def create_write_bytes(): Array[Array[Byte]] = {
+    val bytes = new Array[Array[Byte]](3)
+    0.until(3).foreach { i =>
+      val original = RandomStringUtils.randomAscii(params.bufferSize)
+      val modified = original.substring(0, original.length - 1) + "\n"
+      bytes(i) = modified.getBytes
+    }
+
+    bytes
+  }
+
+  def runWrite(writers: ListBuffer[(DataOutputStream, Array[Array[Byte]])]): Unit = {
     0.until(loopNum).foreach(i => {
+      val bytesIndex = i % 3
       0.until(params.fileNum).foreach(index => {
         executor.execute(index, () => {
-          val (writer, bytes) = writers(index)
-          writer.write(bytes)
+          val (writer, rand_bytes) = writers(index)
+          writer.write(rand_bytes(bytesIndex))
 
           if (params.checksum) {
-            totalLen.add(bytes.length)
-            checksum.add(Utils.crc32(bytes))
+            totalLen.add(rand_bytes(bytesIndex).length)
+            checksum.add(Utils.crc32(rand_bytes(bytesIndex)))
           }
 
           if (i == loopNum - 1) {
