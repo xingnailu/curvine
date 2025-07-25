@@ -90,7 +90,7 @@ impl CurvineFileSystem {
             atimensec: 0,
             mtimensec: ctime_nsec,
             ctimensec: ctime_nsec,
-            mode: FuseUtils::get_mode(FUSE_DEFAULT_MODE, status.is_dir),
+            mode: FuseUtils::get_mode(FUSE_DEFAULT_MODE & !conf.umask, status.is_dir),
             nlink: 1,
             uid: conf.uid,
             gid: conf.gid,
