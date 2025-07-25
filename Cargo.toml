@@ -18,10 +18,12 @@ members = [
     'curvine-tests',
     "curvine-fuse",
     "curvine-web",
-    "curvine-ufs", "curvine-cli"]
+    "curvine-ufs",
+    "curvine-cli"
+]
 
 [workspace.package]
-version = "0.1.1-beta"
+version = "0.2.1-beta"
 edition = "2021"
 license = "Apache-2.0"
 
