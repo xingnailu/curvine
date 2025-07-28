@@ -21,9 +21,6 @@ pub use self::count_down_latch::CountDownLatch;
 mod state_monitor;
 pub use self::state_monitor::*;
 
-mod sync_map;
-pub use self::sync_map::SyncMap;
-
 mod lock;
 pub use self::lock::*;
 
@@ -34,3 +31,15 @@ mod atomic;
 pub use self::atomic::*;
 
 pub mod channel;
+
+pub mod fast_dash_map;
+pub use self::fast_dash_map::FastDashMap;
+
+pub mod fast_sync_cache;
+pub use self::fast_sync_cache::FastSyncCache;
+
+pub mod mutex_hash_map;
+pub use self::mutex_hash_map::MutexHashMap;
+
+mod rw_lock_hash_map;
+pub use self::rw_lock_hash_map::RwLockHashMap;

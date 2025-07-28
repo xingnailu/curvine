@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::common::Utils;
-use crate::io::retry::TimeBondedRetry;
+use crate::io::retry::{TimeBondedRetry, TimeBondedRetryBuilder};
 use crate::runtime::Runtime;
 use std::time::Duration;
 
@@ -39,7 +39,8 @@ pub struct ClientConf {
     // socket data read and write timeout time, default is 60s.
     // It is the timeout time of a connection or request, which has a certain relationship with the time of retrying the policy.
     pub conn_timeout_ms: u64,
-    pub io_timeout_ms: u64,
+    pub rpc_timeout_ms: u64,
+    pub data_timeout_ms: u64,
 
     // How many connections can be used when connecting to share.
     pub conn_size: usize,
@@ -58,6 +59,14 @@ impl ClientConf {
 
     pub fn io_retry_policy(&self) -> TimeBondedRetry {
         TimeBondedRetry::new(
+            Duration::from_millis(self.io_retry_max_duration_ms),
+            Duration::from_millis(self.io_retry_min_sleep_ms),
+            Duration::from_millis(self.io_retry_max_sleep_ms),
+        )
+    }
+
+    pub fn io_retry_builder(&self) -> TimeBondedRetryBuilder {
+        TimeBondedRetryBuilder::new(
             Duration::from_millis(self.io_retry_max_duration_ms),
             Duration::from_millis(self.io_retry_min_sleep_ms),
             Duration::from_millis(self.io_retry_max_sleep_ms),
@@ -89,7 +98,8 @@ impl Default for ClientConf {
             io_retry_max_sleep_ms: 30 * 1000,
 
             conn_timeout_ms: 30 * 1000,
-            io_timeout_ms: 60 * 1000,
+            rpc_timeout_ms: 2 * 60 * 1000,
+            data_timeout_ms: 5 * 60 * 1000,
 
             conn_size: 1,
 

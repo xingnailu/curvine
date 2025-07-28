@@ -42,7 +42,7 @@ impl BufferClient {
         let client_state = Arc::new(raw.state);
         let (sender, receiver) = mpsc::channel(conf.message_size);
         let (read_frame, write_frame) = raw.frame.split();
-        let timout = Duration::from_millis(conf.io_timeout_ms);
+        let timout = Duration::from_millis(conf.rpc_timeout_ms);
 
         let request_future = Self::request_future(
             client_state.clone(),

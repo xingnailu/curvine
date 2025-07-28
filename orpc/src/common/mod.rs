@@ -41,3 +41,9 @@ pub use self::metrics::*;
 
 mod logger_format;
 pub use self::logger_format::LogFormatter;
+
+mod fast_hash_map;
+pub use self::fast_hash_map::FastHashMap;
+
+mod fast_hash_set;
+pub use self::fast_hash_set::FastHashSet;

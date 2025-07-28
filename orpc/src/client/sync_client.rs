@@ -16,7 +16,7 @@ use crate::client::RpcClient;
 use crate::err_box;
 use crate::io::retry::TimeBondedRetry;
 use crate::io::IOResult;
-use crate::message::{BoxMessage, Message};
+use crate::message::Message;
 use crate::runtime::{RpcRuntime, Runtime};
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,7 +49,7 @@ impl SyncClient {
         &self,
         dur: Duration,
         policy: TimeBondedRetry,
-        msg: BoxMessage,
+        msg: Message,
     ) -> IOResult<Message> {
         self.rt.block_on(self.inner.retry_rpc(dur, policy, msg))
     }

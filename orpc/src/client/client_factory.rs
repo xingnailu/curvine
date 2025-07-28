@@ -16,7 +16,7 @@ use crate::client::{ClientConf, RpcClient, SyncClient};
 use crate::io::net::InetAddr;
 use crate::io::IOResult;
 use crate::runtime::{RpcRuntime, Runtime};
-use dashmap::DashMap;
+use crate::sync::FastDashMap;
 use std::sync::{Arc, Mutex};
 
 struct ClientPool {
@@ -56,7 +56,7 @@ impl ClientPool {
 pub struct ClientFactory {
     pub(crate) conf: ClientConf,
     pub(crate) rt: Arc<Runtime>,
-    pool: DashMap<InetAddr, Arc<Mutex<ClientPool>>>,
+    pool: FastDashMap<InetAddr, Arc<Mutex<ClientPool>>>,
 }
 
 impl ClientFactory {
@@ -69,7 +69,7 @@ impl ClientFactory {
         ClientFactory {
             conf,
             rt,
-            pool: DashMap::new(),
+            pool: FastDashMap::default(),
         }
     }
 
@@ -93,14 +93,21 @@ impl ClientFactory {
         Arc::new(Mutex::new(ClientPool::new(conn_size)))
     }
 
-    // Get gets the thread-safe client, so it will not return the raw client.
-    pub async fn get(&self, addr: &InetAddr) -> IOResult<RpcClient> {
-        // Create or get the connection pool.
-        let pool = self
-            .pool
+    // Create or get the connection pool.
+    fn get_pool(&self, addr: &InetAddr) -> Arc<Mutex<ClientPool>> {
+        if let Some(pool) = self.pool.get(addr) {
+            return pool.value().clone();
+        }
+
+        self.pool
             .entry(addr.clone())
             .or_insert(Self::new_pool(self.conf.conn_size))
-            .clone();
+            .clone()
+    }
+
+    // Get gets the thread-safe client, so it will not return the raw client.
+    pub async fn get(&self, addr: &InetAddr) -> IOResult<RpcClient> {
+        let pool = self.get_pool(addr);
 
         let conn_id = {
             let mut lock = pool.lock().unwrap();
@@ -137,6 +144,10 @@ impl ClientFactory {
 
     pub fn rt(&self) -> &Runtime {
         &self.rt
+    }
+
+    pub fn conf(&self) -> &ClientConf {
+        &self.conf
     }
 }
 

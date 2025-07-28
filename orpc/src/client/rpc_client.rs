@@ -19,7 +19,7 @@ use crate::handler::RpcFrame;
 use crate::io::net::InetAddr;
 use crate::io::retry::TimeBondedRetry;
 use crate::io::{IOError, IOResult};
-use crate::message::{BoxMessage, Message, RefMessage};
+use crate::message::{Message, RefMessage};
 use crate::runtime::Runtime;
 use crate::sys::RawPtr;
 use crate::{err_box, try_err};
@@ -126,8 +126,9 @@ impl RpcClient {
         &self,
         dur: Duration,
         mut policy: TimeBondedRetry,
-        msg: BoxMessage,
+        msg: Message,
     ) -> IOResult<Message> {
+        let msg = msg.into_arc();
         while policy.attempt().await {
             let rep = timeout(dur, self.rpc(msg.clone())).await;
             let rep = match rep {
@@ -243,9 +244,9 @@ mod tests {
         let msg = Builder::new_rpc(1).data(DataSlice::from_str("abc")).build();
 
         let rep = if retry {
-            let dur = Duration::from_millis(conf.io_timeout_ms);
+            let dur = Duration::from_millis(conf.rpc_timeout_ms);
             let policy = conf.io_retry_policy();
-            client.retry_rpc(dur, policy, msg.into_arc()).await.unwrap()
+            client.retry_rpc(dur, policy, msg).await.unwrap()
         } else {
             client.rpc(msg).await.unwrap()
         };

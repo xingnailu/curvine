@@ -35,5 +35,5 @@ pub mod dispatch;
 mod client_state;
 pub use self::client_state::ClientState;
 
-mod group_factory;
-pub use self::group_factory::GroupFactory;
+mod cluster_connector;
+pub use self::cluster_connector::ClusterConnector;

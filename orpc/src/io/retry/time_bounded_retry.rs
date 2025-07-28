@@ -101,6 +101,16 @@ impl TimeBondedRetryBuilder {
     }
 }
 
+impl Default for TimeBondedRetryBuilder {
+    fn default() -> Self {
+        Self::new(
+            Duration::from_secs(60),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::common::LocalTime;

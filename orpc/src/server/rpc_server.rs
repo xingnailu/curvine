@@ -141,7 +141,8 @@ where
         let bind_addr = self.get_bind_addr();
         let listener = TcpListener::bind(&bind_addr).await?;
         info!(
-            "Rpc server start successfully, bind address: {}, hostname: {}, thread_name: {}, io threads: {}, worker threads: {}",
+            "Rpc server [{}] start successfully, bind address: {}, hostname: {}, thread_name: {}, io threads: {}, worker threads: {}",
+            self.conf.name,
             bind_addr,
             self.addr.hostname,
             self.rt.thread_name(),
@@ -175,7 +176,7 @@ where
         &self.rt
     }
 
-    pub fn new_rt(&self) -> Arc<Runtime> {
+    pub fn clone_rt(&self) -> Arc<Runtime> {
         self.rt.clone()
     }
 

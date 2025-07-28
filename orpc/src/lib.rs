@@ -32,9 +32,3 @@ pub type CommonError = Box<dyn std::error::Error + Send + Sync>;
 pub type CommonResult<T> = Result<T, CommonError>;
 
 pub type CommonResultExt<T> = Result<T, CommonErrorExt>;
-
-pub type FastHashMap<K, V> =
-    std::collections::HashMap<K, V, std::hash::BuildHasherDefault<fxhash::FxHasher>>;
-
-pub type FastHashSet<T> =
-    std::collections::HashSet<T, std::hash::BuildHasherDefault<fxhash::FxHasher>>;

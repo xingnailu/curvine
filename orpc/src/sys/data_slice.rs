@@ -188,6 +188,13 @@ impl DataSlice {
             Bytes(s) => s.clear(),
         }
     }
+
+    pub fn freeze(self) -> Self {
+        match self {
+            Buffer(s) => Bytes(s.freeze()),
+            _ => self,
+        }
+    }
 }
 
 impl Clone for DataSlice {
@@ -207,5 +214,13 @@ impl Clone for DataSlice {
 impl From<&str> for DataSlice {
     fn from(value: &str) -> Self {
         Buffer(BytesMut::from(value.as_bytes()))
+    }
+}
+
+impl From<String> for DataSlice {
+    fn from(value: String) -> Self {
+        let mut bytes = BytesMut::new();
+        bytes.extend_from_slice(value.as_bytes());
+        Buffer(bytes)
     }
 }

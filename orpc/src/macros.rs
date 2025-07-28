@@ -204,16 +204,6 @@ macro_rules! try_finally {
 }
 
 /// Create a tokio timeout future, which is equivalent to the following code:
-/// let task = ...
-///
-///     let timeout_task = async move {
-///     let inner = tokio::time::timeout(dur, task);
-///     match inner.await {
-///         Ok(v) => v,
-///           Err(e) => err_box!(e)
-//      }
-///  }
-///
 #[macro_export]
 macro_rules! timeout {
     ($dur:expr, $future:expr) => {{

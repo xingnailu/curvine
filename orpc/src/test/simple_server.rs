@@ -19,7 +19,7 @@ use crate::io::net::{ConnState, InetAddr, NetUtils};
 use crate::message::Message;
 use crate::runtime::Runtime;
 use crate::server::{RpcServer, ServerConf};
-use crate::sync::SyncMap;
+use crate::sync::FastDashMap;
 use crate::sys::DataSlice;
 use crate::{err_box, CommonResultExt};
 use log::info;
@@ -28,7 +28,7 @@ use std::thread;
 
 pub struct SimpleHandler {
     mock: bool,
-    call_map: SyncMap<i64, u32>,
+    call_map: FastDashMap<i64, u32>,
 }
 
 impl MessageHandler for SimpleHandler {
@@ -70,7 +70,7 @@ impl HandlerService for SimpleService {
     fn get_message_handler(&self, _: Option<ConnState>) -> Self::Item {
         SimpleHandler {
             mock: true,
-            call_map: SyncMap::new(),
+            call_map: FastDashMap::default(),
         }
     }
 }
@@ -102,7 +102,7 @@ impl SimpleServer {
     }
 
     pub fn new_rt(&self) -> Arc<Runtime> {
-        self.server.new_rt()
+        self.server.clone_rt()
     }
 }
 

@@ -14,9 +14,11 @@
 
 use crate::common::LocalTime;
 use crate::runtime::Runtime;
+use crate::CommonResult;
 use rand::prelude::ThreadRng;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use serde::de::DeserializeOwned;
 use std::backtrace::Backtrace;
 use std::io::Cursor;
 use std::panic::AssertUnwindSafe;
@@ -170,6 +172,12 @@ impl Utils {
     pub fn worker_threads(io_threads: usize) -> usize {
         let cpus = Self::cpu_nums();
         io_threads.max(2 * cpus)
+    }
+
+    pub fn read_toml_conf<T: DeserializeOwned>(path: impl AsRef<Path>) -> CommonResult<T> {
+        let content = std::fs::read_to_string(path)?;
+        let conf = toml::from_str::<T>(&content)?;
+        Ok(conf)
     }
 }
 

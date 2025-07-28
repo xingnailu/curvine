@@ -18,7 +18,7 @@ use crate::handler::RpcFrame;
 use crate::io::net::InetAddr;
 use crate::io::{IOError, IOResult};
 use crate::message::Message;
-use log::debug;
+use log::warn;
 use socket2::SockRef;
 use std::mem;
 use std::time::Duration;
@@ -68,7 +68,7 @@ impl RawClient {
                     Ok(s) => return Ok(s),
 
                     Err(e) => {
-                        debug!(
+                        warn!(
                             "Failed to connect {}(retry times {}): {}",
                             addr,
                             policy.count(),
@@ -79,7 +79,7 @@ impl RawClient {
                 },
 
                 Err(e) => {
-                    debug!(
+                    warn!(
                         "Failed to connect {}(retry times {}): {}",
                         addr,
                         policy.count(),

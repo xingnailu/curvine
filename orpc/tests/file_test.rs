@@ -52,7 +52,7 @@ fn file_server() -> CommonResult<()> {
 
     let service = FileService::new(dirs);
     let server = RpcServer::new(conf, service);
-    let rt = server.new_rt();
+    let rt = server.clone_rt();
     let mut status_receiver = RpcServer::run_server(server);
     rt.block_on(status_receiver.wait_running())?;
 

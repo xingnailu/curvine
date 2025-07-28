@@ -16,7 +16,7 @@ use crate::err_box;
 use crate::handler::RpcCodec;
 use crate::io::IOResult;
 use crate::message::{BoxMessage, Message, RefMessage};
-use dashmap::DashMap;
+use crate::sync::FastDashMap;
 use futures::stream::{SplitSink, SplitStream};
 use log::warn;
 use std::collections::HashMap;
@@ -67,11 +67,11 @@ impl Envelope {
     }
 }
 
-pub struct CallMap(DashMap<i64, Callback>);
+pub struct CallMap(FastDashMap<i64, Callback>);
 
 impl CallMap {
     pub fn new() -> Self {
-        Self(DashMap::new())
+        Self(FastDashMap::default())
     }
 
     pub fn insert(&self, req_id: i64, cb: Callback) {

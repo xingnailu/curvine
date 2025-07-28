@@ -41,7 +41,7 @@ impl RefMessage for BoxMessage {
     }
 
     fn as_mut(&mut self) -> &mut Message {
-        panic!()
+        panic!("BoxMessage cannot obtain a mutable reference")
     }
 
     fn into_box(self) -> BoxMessage {
@@ -52,7 +52,7 @@ impl RefMessage for BoxMessage {
 impl Clone for BoxMessage {
     fn clone(&self) -> Self {
         match self {
-            BoxMessage::Msg(_) => panic!(""),
+            BoxMessage::Msg(_) => panic!("Message not support clone"),
             BoxMessage::Arc(m) => BoxMessage::Arc(m.clone()),
         }
     }
