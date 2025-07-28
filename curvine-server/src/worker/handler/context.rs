@@ -14,8 +14,8 @@
 
 use curvine_common::proto::{BlockReadRequest, BlockWriteRequest};
 use curvine_common::state::ExtendedBlock;
+use curvine_common::FsResult;
 use orpc::message::Message;
-use orpc::CommonResult;
 
 pub struct WriteContext {
     pub block: ExtendedBlock,
@@ -28,7 +28,7 @@ pub struct WriteContext {
 }
 
 impl WriteContext {
-    pub fn from_req(msg: &Message) -> CommonResult<Self> {
+    pub fn from_req(msg: &Message) -> FsResult<Self> {
         let req: BlockWriteRequest = msg.parse_header()?;
         let context = Self {
             block: ExtendedBlock::from_req(&req),
@@ -57,7 +57,7 @@ pub struct ReadContext {
 }
 
 impl ReadContext {
-    pub fn from_req(msg: &Message) -> CommonResult<Self> {
+    pub fn from_req(msg: &Message) -> FsResult<Self> {
         let req: BlockReadRequest = msg.parse_header()?;
         let context = Self {
             block_id: req.id,

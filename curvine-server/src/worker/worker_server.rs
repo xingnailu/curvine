@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused)]
-
 use crate::worker::block::{BlockActor, BlockStore};
 use crate::worker::handler::{WorkerHandler, WorkerRouterHandler};
 use crate::worker::load::FileLoadService;
@@ -28,9 +26,10 @@ use orpc::common::{LocalTime, Logger, Metrics};
 use orpc::handler::HandlerService;
 use orpc::io::net::ConnState;
 use orpc::runtime::{RpcRuntime, Runtime};
-use orpc::server::RpcServer;
+use orpc::server::{RpcServer, ServerStateListener};
 use orpc::CommonResult;
 use std::sync::Arc;
+use std::thread;
 
 static CLUSTER_CONF: OnceCell<ClusterConf> = OnceCell::new();
 
@@ -45,9 +44,8 @@ pub struct WorkerService {
 }
 
 impl WorkerService {
-    pub fn from_conf(conf: &ClusterConf) -> CommonResult<Self> {
+    pub fn with_conf(conf: &ClusterConf, rt: Arc<Runtime>) -> CommonResult<Self> {
         let store: BlockStore = BlockStore::new(&conf.cluster_id, conf)?;
-        let rt = Arc::new(conf.worker_server_conf().create_runtime());
         let fs_context = FsContext::with_rt(conf.clone(), rt.clone())?;
         let mut file_loader =
             FileLoadService::from_cluster_conf(Arc::from(fs_context), rt.clone(), conf);
@@ -61,9 +59,17 @@ impl WorkerService {
             store,
             conf: conf.clone(),
             file_loader: Arc::from(file_loader),
-            rt: rt.clone(),
+            rt,
         };
         Ok(ws)
+    }
+
+    pub fn clone_rt(&self) -> Arc<Runtime> {
+        self.rt.clone()
+    }
+
+    pub fn conf(&self) -> &ClusterConf {
+        &self.conf
     }
 }
 
@@ -90,41 +96,30 @@ impl WebHandlerService for WorkerService {
 
 // block data start service.
 pub struct Worker {
-    start_ms: u64,
-    worker_id: u32,
+    pub start_ms: u64,
+    pub worker_id: u32,
+    pub addr: WorkerAddress,
     rpc_server: RpcServer<WorkerService>,
     web_server: WebServer<WorkerService>,
-    conf: ClusterConf,
-    addr: WorkerAddress,
     block_actor: BlockActor,
 }
 
 impl Worker {
-    pub fn new(conf: ClusterConf) -> CommonResult<Self> {
+    pub fn with_conf(conf: ClusterConf) -> CommonResult<Self> {
         Logger::init(conf.worker.log.clone());
         Metrics::init();
 
-        let service: WorkerService = WorkerService::from_conf(&conf)?;
+        let rt = Arc::new(conf.worker_server_conf().create_runtime());
+        let service: WorkerService = WorkerService::with_conf(&conf, rt.clone())?;
         let worker_id = service.store.worker_id();
 
-        // The test cluster is started locally, and multiple worker global variables can only be registered once, so there is this judgment.
-        if CLUSTER_CONF.get().is_none() {
-            CLUSTER_CONF.set(conf.clone()).unwrap();
-        }
-        if WORKER_METRICS.get().is_none() {
-            let metrics = WorkerMetrics::new(service.store.clone())?;
-            WORKER_METRICS.set(metrics).unwrap();
-        }
-
-        conf.print();
+        CLUSTER_CONF.get_or_init(|| conf.clone());
+        WORKER_METRICS.get_or_init(|| WorkerMetrics::new(service.store.clone()).unwrap());
 
         let block_store = service.store.clone();
-        let rpc_server = RpcServer::with_rt(
-            service.rt.clone(),
-            conf.worker_server_conf(),
-            service.clone(),
-        );
-        let web_server = WebServer::with_rt(service.rt.clone(), conf.worker_web_conf(), service);
+        let rpc_server = RpcServer::with_rt(rt.clone(), conf.worker_server_conf(), service.clone());
+
+        let web_server = WebServer::with_rt(rt.clone(), conf.worker_web_conf(), service);
 
         let net_addr = rpc_server.bind_addr();
         let addr = WorkerAddress {
@@ -135,7 +130,7 @@ impl Worker {
             web_port: conf.worker.web_port as u32,
         };
         let block_actor = BlockActor::new(
-            rpc_server.new_rt(),
+            rt.clone(),
             &conf,
             addr.clone(),
             block_store,
@@ -150,35 +145,40 @@ impl Worker {
         });
 
         let worker = Self {
-            worker_id,
             start_ms: LocalTime::mills(),
+            worker_id,
+            addr,
             rpc_server,
             web_server,
-            conf: conf.clone(),
-            addr,
             block_actor,
         };
 
         Ok(worker)
     }
 
-    pub fn block_on_start(self) {
-        let rt = self.rpc_server.new_rt();
-        let mut listener = rt.block_on(async move {
-            // step 2: Start rpc server
-            let mut listener = self.rpc_server.start();
-            listener.wait_running().await.unwrap();
+    pub async fn start(self) -> ServerStateListener {
+        // step 1: Start rpc server
+        let mut rpc_status = self.rpc_server.start();
+        rpc_status.wait_running().await.unwrap();
 
-            listener
-        });
+        // step 2: Start block heartbeat check service
+        thread::spawn(move || self.block_actor.start())
+            .join()
+            .unwrap();
 
-        // step 1: Start block heartbeat check service
-        self.block_actor.start();
-
-        // step3: Start the web server
+        // step 3: Start the web server
         self.web_server.start();
 
-        rt.block_on(listener.wait_stop()).unwrap();
+        rpc_status
+    }
+
+    pub fn block_on_start(self) {
+        let rt = self.rpc_server.clone_rt();
+
+        rt.block_on(async move {
+            let mut rpc_status = self.start().await;
+            rpc_status.wait_stop().await.unwrap();
+        })
     }
 
     // Start a standalone worker.
@@ -194,7 +194,7 @@ impl Worker {
         WORKER_METRICS.get().expect("Worker get metrics error!")
     }
 
-    pub fn get_block_store(&self) -> BlockStore {
-        self.rpc_server.service().store.clone()
+    pub fn service(&self) -> &WorkerService {
+        self.rpc_server.service()
     }
 }

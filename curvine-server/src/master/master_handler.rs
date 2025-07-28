@@ -30,7 +30,6 @@ use orpc::handler::MessageHandler;
 use orpc::io::net::ConnState;
 use orpc::message::Message;
 use orpc::runtime::Runtime;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct MasterHandler {
@@ -113,7 +112,7 @@ impl MasterHandler {
         let header: CreateFileRequest = ctx.parse_header()?;
         ctx.set_audit(Some(header.path.to_string()), None);
 
-        let context = CreateFileContext::from_pb(header);
+        let context = CreateFileContext::from_opts(header.path, header.opts);
         let status = self.create_file0(ctx.msg.req_id(), context)?;
 
         let rep_header = CreateFileResponse {
@@ -202,14 +201,7 @@ impl MasterHandler {
         let client_addr = ProtoUtils::client_address_from_pb(req.client_address);
         let previous = req.previous.map(ProtoUtils::commit_block_from_pb);
 
-        let mut exclude_workers = HashSet::new();
-        for item in req.exclude_workers {
-            exclude_workers.insert(item.worker_id);
-        }
-
-        let located_block = self
-            .fs
-            .add_block(path, client_addr, previous, exclude_workers)?;
+        let located_block = self.fs.add_block(path, client_addr, previous, vec![])?;
         let rep_header = ProtoUtils::located_block_to_pb(located_block);
         ctx.response(rep_header)
     }
@@ -228,15 +220,16 @@ impl MasterHandler {
 
     pub fn retry_check_append_file(&self, ctx: &mut RpcContext<'_>) -> FsResult<Message> {
         let req: AppendFileRequest = ctx.parse_header()?;
-        ctx.set_audit(Some(req.path.to_string()), None);
+        let context = CreateFileContext::from_opts(req.path, req.opts);
+        ctx.set_audit(Some(context.path.to_string()), None);
 
         if self.check_is_retry(ctx.msg.req_id())? {
             // @todo Currently, it is directly reported, and subsequent optimizations are made.
-            return err_box!("append {} repeat request", req.path);
+            return err_box!("append {} repeat request", context.path);
         }
 
         let res = {
-            let (last_block, status) = self.fs.append_file(req.path, req.client_name)?;
+            let (last_block, status) = self.fs.append_file(context)?;
             let rep_header = AppendFileResponse {
                 file_status: ProtoUtils::file_status_to_pb(status),
                 last_block: last_block.map(ProtoUtils::located_block_to_pb),

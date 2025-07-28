@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use crate::master::fs::context::{CreateFileContext, ValidateAddBlock};
+use crate::master::fs::policy::ChooseContext;
 use crate::master::journal::JournalSystem;
 use crate::master::meta::inode::{InodePath, InodeView, PATH_SEPARATOR};
 use crate::master::meta::{FsDir, InodeId};
 use crate::master::{MasterMonitor, SyncFsDir, SyncWorkerManager};
 use curvine_common::conf::{ClusterConf, MasterConf};
+use curvine_common::error::FsError;
 use curvine_common::state::*;
 use curvine_common::FsResult;
 use log::warn;
 use orpc::sync::ArcRwLock;
-use orpc::{err_box, try_option, CommonResult};
-use std::collections::{HashMap, HashSet};
+use orpc::{err_box, err_ext, try_option, CommonResult};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -149,6 +150,10 @@ impl MasterFilesystem {
     }
 
     pub fn create_file(&self, context: CreateFileContext) -> FsResult<FileStatus> {
+        if !context.create() {
+            return err_box!("Flag error {}, cannot create file", context.create_flag);
+        }
+
         // Check the path length
         self.check_path_length(&context.path)?;
 
@@ -189,6 +194,41 @@ impl MasterFilesystem {
         let status = fs_dir.file_status(&inp)?;
 
         Ok(status)
+    }
+
+    pub fn append_file(
+        &self,
+        context: CreateFileContext,
+    ) -> FsResult<(Option<LocatedBlock>, FileStatus)> {
+        if !context.append() {
+            return err_box!("Flag error {}, cannot append file", context.create_flag);
+        }
+
+        let mut fs_dir = self.fs_dir.write();
+        let inp = Self::resolve_path(&fs_dir, &context.path)?;
+
+        if inp.get_last_inode().is_none() {
+            if context.create() {
+                drop(fs_dir);
+                let status = self.create_file(context)?;
+                Ok((None, status))
+            } else {
+                err_ext!(FsError::file_not_found(inp.path()))
+            }
+        } else {
+            let (last_block, file_status) = fs_dir.append_file(&inp, &context.client_name)?;
+
+            let last_block = if let Some(last_block) = last_block {
+                let block_locs = fs_dir.get_block_locations(last_block.id)?;
+                let wm = self.worker_manager.read();
+                let lb = wm.create_locate_block(inp.path(), last_block, &block_locs)?;
+                drop(wm);
+                Some(lb)
+            } else {
+                None
+            };
+            Ok((last_block, file_status))
+        }
     }
 
     pub fn file_status<T: AsRef<str>>(&self, path: T) -> FsResult<FileStatus> {
@@ -293,7 +333,7 @@ impl MasterFilesystem {
         path: T,
         client_addr: ClientAddress,
         previous: Option<CommitBlock>,
-        exclude_workers: HashSet<u32>,
+        exclude_workers: Vec<u32>,
     ) -> FsResult<LocatedBlock> {
         let mut fs_dir = self.fs_dir.write();
 
@@ -303,8 +343,10 @@ impl MasterFilesystem {
 
         let wm = self.worker_manager.read();
 
+        let choose_ctx = ChooseContext::with_block(validate_block, exclude_workers);
+
         // Select worker.
-        let choose_workers = wm.choose_worker(validate_block, Some(exclude_workers))?;
+        let choose_workers = wm.choose_worker(choose_ctx)?;
         drop(wm);
 
         let block = fs_dir.acquire_new_block(&inp, previous, &choose_workers)?;
@@ -376,8 +418,7 @@ impl MasterFilesystem {
 
         let wm = self.worker_manager.read();
         let file_locs = fs_dir.get_file_locations(file)?;
-        let mut res_locs = HashMap::with_capacity(file_locs.len());
-        let mut block_ids = Vec::with_capacity(file.blocks.len());
+        let mut block_locs = Vec::with_capacity(file_locs.len());
 
         for (index, meta) in file.blocks.iter().enumerate() {
             if index as i64 + 1 != InodeId::get_seq(meta.id) {
@@ -404,21 +445,19 @@ impl MasterFilesystem {
                 file_type: file.file_type,
             };
 
-            let block_locs = try_option!(
+            let lc = try_option!(
                 file_locs.get(&meta.id),
                 "File {}, block {} Lost (no worker can read)",
                 path,
                 meta.id
             );
-            let lb = wm.create_locate_block(path, extend_block, block_locs)?;
-            block_ids.push(meta.id);
-            res_locs.insert(meta.id, lb);
+            let lb = wm.create_locate_block(path, extend_block, lc)?;
+            block_locs.push(lb);
         }
 
         let locate_blocks = FileBlocks {
             status: inode.to_file_status(path),
-            block_ids,
-            block_locs: res_locs,
+            block_locs,
         };
 
         Ok(locate_blocks)
@@ -532,28 +571,6 @@ impl MasterFilesystem {
     pub fn delete_locations(&self, worker_id: u32) -> FsResult<()> {
         let fs_dir = self.fs_dir.write();
         fs_dir.delete_locations(worker_id)
-    }
-
-    pub fn append_file<T: AsRef<str>>(
-        &self,
-        path: T,
-        client_name: T,
-    ) -> FsResult<(Option<LocatedBlock>, FileStatus)> {
-        let mut fs_dir = self.fs_dir.write();
-        let path = path.as_ref();
-        let inp = Self::resolve_path(&fs_dir, path)?;
-        let (last_block, file_status) = fs_dir.append_file(&inp, client_name)?;
-
-        let last_block = if let Some(last_block) = last_block {
-            let block_locs = fs_dir.get_block_locations(last_block.id)?;
-            let wm = self.worker_manager.read();
-            let lb = wm.create_locate_block(path, last_block, &block_locs)?;
-            drop(wm);
-            Some(lb)
-        } else {
-            None
-        };
-        Ok((last_block, file_status))
     }
 }
 

@@ -250,11 +250,11 @@ impl FsDir {
         let op_ms = LocalTime::mills();
         // If overwrite = true, delete the existing file first.
         if inp.get_last_inode().is_some() {
-            if context.overwrite {
+            if context.overwrite() {
                 let _ = self.delete(&inp, false)?;
                 inp.delete_last();
             } else {
-                return err_box!("{}  already exists", inp.path());
+                return err_ext!(FsError::file_exists(inp.path()));
             }
         }
 

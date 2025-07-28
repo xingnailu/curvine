@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
+use crate::master::fs::policy::ChooseContext;
 use curvine_common::state::{WorkerAddress, WorkerInfo};
 use indexmap::IndexMap;
 use orpc::CommonResult;
-use std::collections::HashSet;
 
 /// Worker selects a policy
 pub trait WorkerPolicy: Send + Sync {
@@ -24,8 +23,7 @@ pub trait WorkerPolicy: Send + Sync {
     fn choose(
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
-        block: &ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
+        ctx: ChooseContext,
     ) -> CommonResult<Vec<WorkerAddress>>;
 
     /// Select a specified number of workers without relying on block information
@@ -36,6 +34,9 @@ pub trait WorkerPolicy: Send + Sync {
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
         count: Option<usize>,
-        exclude_workers: Option<HashSet<u32>>,
-    ) -> CommonResult<Vec<WorkerAddress>>;
+        exclude_workers: Vec<u32>,
+    ) -> CommonResult<Vec<WorkerAddress>> {
+        let ctx = ChooseContext::with_num(count.unwrap_or(1) as u16, 0, exclude_workers);
+        self.choose(workers, ctx)
+    }
 }

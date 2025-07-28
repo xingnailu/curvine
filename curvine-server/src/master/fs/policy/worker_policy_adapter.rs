@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
 use crate::master::fs::policy::WorkerPolicyAdapter::{LoadBased, Local, Random, Robin};
 use crate::master::fs::policy::{
-    LoadBasedWorkerPolicy, LocalWorkerPolicy, RandomWorkerPolicy, RobinWorkerPolicy, WorkerPolicy,
+    ChooseContext, LoadBasedWorkerPolicy, LocalWorkerPolicy, RandomWorkerPolicy, RobinWorkerPolicy,
+    WorkerPolicy,
 };
 use curvine_common::conf::ClusterConf;
 use curvine_common::state::{WorkerAddress, WorkerInfo};
 use indexmap::IndexMap;
 use orpc::{err_box, CommonResult};
-use std::collections::HashSet;
 
 pub enum WorkerPolicyAdapter {
     Robin(RobinWorkerPolicy),
@@ -51,14 +50,13 @@ impl WorkerPolicyAdapter {
     pub fn choose(
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
-        block: &ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
+        ctx: ChooseContext,
     ) -> CommonResult<Vec<WorkerAddress>> {
         match self {
-            Robin(ref f) => f.choose(workers, block, exclude_workers),
-            Local(ref f) => f.choose(workers, block, exclude_workers),
-            Random(ref f) => f.choose(workers, block, exclude_workers),
-            LoadBased(ref f) => f.choose(workers, block, exclude_workers),
+            Robin(ref f) => f.choose(workers, ctx),
+            Local(ref f) => f.choose(workers, ctx),
+            Random(ref f) => f.choose(workers, ctx),
+            LoadBased(ref f) => f.choose(workers, ctx),
         }
     }
 
@@ -66,7 +64,7 @@ impl WorkerPolicyAdapter {
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
         count: usize,
-        exclude_workers: Option<HashSet<u32>>,
+        exclude_workers: Vec<u32>,
     ) -> CommonResult<Vec<WorkerAddress>> {
         match self {
             Robin(ref f) => f.choose_workers(workers, Some(count), exclude_workers),

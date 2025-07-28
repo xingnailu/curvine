@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use curvine_common::conf::MasterConf;
 use curvine_common::error::FsError;
 use curvine_common::FsResult;
 use mini_moka::sync::{Cache, CacheBuilder};
 use num_enum::{FromPrimitive, IntoPrimitive};
+use orpc::common::DurationUnit;
 use orpc::err_ext;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -41,6 +43,18 @@ impl FsRetryCache {
     pub fn new(capacity: u64, ttl: Duration) -> Self {
         let cache = CacheBuilder::new(capacity).time_to_live(ttl).build();
         Self(Arc::new(cache))
+    }
+
+    pub fn with_conf(conf: &MasterConf) -> Option<FsRetryCache> {
+        if conf.retry_cache_enable {
+            let ttl = DurationUnit::from_str(&conf.retry_cache_ttl)
+                .unwrap()
+                .as_duration();
+            let cache = Self::new(conf.retry_cache_size, ttl);
+            Some(cache)
+        } else {
+            None
+        }
     }
 
     // Check whether it is a retry request.

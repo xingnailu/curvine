@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
-use crate::master::fs::policy::WorkerPolicy;
+use crate::master::fs::policy::{ChooseContext, WorkerPolicy};
 use curvine_common::state::{WorkerAddress, WorkerInfo};
 use indexmap::IndexMap;
 use orpc::{err_box, CommonResult};
@@ -80,39 +79,20 @@ impl WorkerPolicy for RandomWorkerPolicy {
     fn choose(
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
-        block: &ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
+        ctx: ChooseContext,
     ) -> CommonResult<Vec<WorkerAddress>> {
         if workers.is_empty() {
             return err_box!("No workers available");
         }
-        if block.replicas < 1 {
+        if ctx.replicas < 1 {
             return err_box!("The number of replicas cannot be 0");
         }
 
         self.select_random_workers(
             workers,
-            block.replicas as usize,
-            &exclude_workers.unwrap_or_default(),
-            block.block_size,
+            ctx.replicas as usize,
+            &ctx.exclude_workers,
+            ctx.block_size,
         )
-    }
-
-    fn choose_workers(
-        &self,
-        workers: &IndexMap<u32, WorkerInfo>,
-        count: Option<usize>,
-        exclude_workers: Option<HashSet<u32>>,
-    ) -> CommonResult<Vec<WorkerAddress>> {
-        if workers.is_empty() {
-            return err_box!("No workers available");
-        }
-        let count = count.unwrap_or(1);
-        if count < 1 {
-            return err_box!("The number of workers to choose cannot be 0");
-        }
-
-        // Without relying on block, we set the minimum available space to 0
-        self.select_random_workers(workers, count, &exclude_workers.unwrap_or_default(), 0)
     }
 }

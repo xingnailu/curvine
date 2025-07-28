@@ -36,12 +36,12 @@ fn main() -> CommonResult<()> {
 
     match service {
         ServiceType::Master => {
-            let master = Master::new(conf)?;
+            let master = Master::with_conf(conf)?;
             master.block_on_start();
         }
 
         ServiceType::Worker => {
-            let worker = Worker::new(conf)?;
+            let worker = Worker::with_conf(conf)?;
             worker.block_on_start();
         }
     }

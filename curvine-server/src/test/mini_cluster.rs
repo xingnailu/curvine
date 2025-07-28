@@ -14,7 +14,6 @@
 
 use crate::master::fs::MasterFilesystem;
 use crate::master::Master;
-use crate::worker::block::BlockStore;
 use crate::worker::Worker;
 use curvine_client::file::CurvineFileSystem;
 use curvine_common::conf::ClusterConf;
@@ -38,7 +37,6 @@ pub struct MiniCluster {
     pub worker_conf: Vec<ClusterConf>,
 
     pub master_fs: DashMap<usize, MasterFilesystem>,
-    pub worker_store: DashMap<u32, BlockStore>,
     pub client_rt: Arc<Runtime>,
 }
 
@@ -50,7 +48,6 @@ impl MiniCluster {
             master_conf,
             worker_conf,
             master_fs: DashMap::new(),
-            worker_store: DashMap::new(),
             client_rt,
         }
     }
@@ -63,7 +60,7 @@ impl MiniCluster {
 
     pub fn start_master(&self) {
         for (index, conf) in self.master_conf.iter().enumerate() {
-            let master = Master::new(conf.clone()).unwrap();
+            let master = Master::with_conf(conf.clone()).unwrap();
             self.master_fs.insert(index, master.get_fs());
             thread::spawn(move || master.block_on_start());
         }
@@ -71,9 +68,7 @@ impl MiniCluster {
 
     pub fn start_worker(&self) {
         for conf in &self.worker_conf {
-            let worker = Worker::new(conf.clone()).unwrap();
-            let store = worker.get_block_store();
-            self.worker_store.insert(store.worker_id(), store);
+            let worker = Worker::with_conf(conf.clone()).unwrap();
             thread::spawn(move || worker.block_on_start());
         }
     }

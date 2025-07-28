@@ -17,14 +17,13 @@ use curvine_common::fs::RpcCode;
 use curvine_common::proto::{CreateFileRequest, DeleteRequest, MkdirRequest, RenameRequest};
 use curvine_common::state::{BlockLocation, ClientAddress, CommitBlock, WorkerInfo};
 use curvine_server::master::fs::context::CreateFileContext;
-use curvine_server::master::fs::{MasterFilesystem, OperationStatus};
+use curvine_server::master::fs::{FsRetryCache, MasterFilesystem, OperationStatus};
 use curvine_server::master::journal::JournalSystem;
 use curvine_server::master::{LoadManager, Master, MasterHandler, RpcContext};
 use orpc::common::Utils;
 use orpc::message::Builder;
 use orpc::runtime::AsyncRuntime;
 use orpc::CommonResult;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 // Test the master filesystem function separately.
@@ -65,7 +64,7 @@ fn new_handler() -> MasterHandler {
     let journal_system = JournalSystem::from_conf(&conf).unwrap();
     let fs = MasterFilesystem::new(&conf, &journal_system).unwrap();
     fs.add_test_worker(WorkerInfo::default());
-    let retry_cache = Master::create_fs_retry_cache(&conf.master);
+    let retry_cache = FsRetryCache::with_conf(&conf.master);
 
     let mount_manager = journal_system.mount_manager();
     let rt = Arc::new(AsyncRuntime::single());
@@ -261,18 +260,14 @@ fn add_block_retry(fs: &MasterFilesystem) -> CommonResult<()> {
     let context = CreateFileContext::with_path(path, false);
     let status = fs.create_file(context).unwrap();
 
-    let b1 = fs
-        .add_block(path, addr.clone(), None, HashSet::new())
-        .unwrap();
-    let b2 = fs
-        .add_block(path, addr.clone(), None, HashSet::new())
-        .unwrap();
+    let b1 = fs.add_block(path, addr.clone(), None, vec![]).unwrap();
+    let b2 = fs.add_block(path, addr.clone(), None, vec![]).unwrap();
 
     assert_eq!(b1.block.id, b2.block.id);
 
     let locs = fs.get_block_locations(path).unwrap();
     println!("locs = {:?}", locs);
-    assert_eq!(locs.block_ids.len(), 1);
+    assert_eq!(locs.block_locs.len(), 1);
 
     let commit = CommitBlock {
         block_id: b1.block.id,
@@ -284,16 +279,16 @@ fn add_block_retry(fs: &MasterFilesystem) -> CommonResult<()> {
     };
 
     let b1 = fs
-        .add_block(path, addr.clone(), Some(commit.clone()), HashSet::new())
+        .add_block(path, addr.clone(), Some(commit.clone()), vec![])
         .unwrap();
     let b2 = fs
-        .add_block(path, addr.clone(), Some(commit), HashSet::new())
+        .add_block(path, addr.clone(), Some(commit), vec![])
         .unwrap();
     assert_eq!(b1.block.id, b2.block.id);
 
     let locs = fs.get_block_locations(path).unwrap();
     println!("locs = {:?}", locs);
-    assert_eq!(locs.block_ids.len(), 2);
+    assert_eq!(locs.block_locs.len(), 2);
 
     Ok(())
 }
@@ -304,7 +299,7 @@ fn complete_file_retry(fs: &MasterFilesystem) -> CommonResult<()> {
     let context = CreateFileContext::with_path(path, false);
     fs.create_file(context)?;
 
-    let b1 = fs.add_block(path, addr.clone(), None, HashSet::new())?;
+    let b1 = fs.add_block(path, addr.clone(), None, vec![])?;
 
     let commit = CommitBlock {
         block_id: b1.block.id,

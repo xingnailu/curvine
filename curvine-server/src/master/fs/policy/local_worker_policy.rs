@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
-use crate::master::fs::policy::{RobinWorkerPolicy, WorkerPolicy};
+use crate::master::fs::policy::{ChooseContext, RobinWorkerPolicy, WorkerPolicy};
 use curvine_common::state::{WorkerAddress, WorkerInfo};
 use indexmap::IndexMap;
 use orpc::{err_box, CommonResult};
-use std::collections::HashSet;
 
 /// Local workers are preferred, and polling policies are used if there are no local workers
 pub struct LocalWorkerPolicy {
@@ -42,38 +40,36 @@ impl WorkerPolicy for LocalWorkerPolicy {
     fn choose(
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
-        block: &ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
+        mut ctx: ChooseContext,
     ) -> CommonResult<Vec<WorkerAddress>> {
         if workers.is_empty() {
             return err_box!("No workers available");
         }
-        if block.replicas < 1 {
+        if ctx.replicas < 1 {
             return err_box!("The number of replicas cannot be 0");
         }
 
         let mut res = vec![];
-        let mut excluded = exclude_workers.unwrap_or_default();
 
         // step1: Detect whether the local worker exists
         for (id, worker) in workers {
-            if !excluded.contains(id)
-                && worker.address.is_local(&block.client_host)
-                && worker.available > block.block_size
+            if !ctx.exclude_workers.contains(id)
+                && worker.address.is_local(&ctx.client_host)
+                && worker.available > ctx.block_size
                 && worker.is_live()
             {
                 res.push(worker.address.clone());
-                excluded.insert(*id);
+                ctx.exclude_workers.insert(*id);
                 break;
             }
         }
 
-        // @todo Follow-up optimization.
-        if res.len() < block.replicas as usize {
-            let remote_res = self.inner.choose(workers, block, Some(excluded))?;
+        let replicas = ctx.replicas;
+        if res.len() < replicas as usize {
+            let remote_res = self.inner.choose(workers, ctx)?;
             for item in remote_res {
                 res.push(item);
-                if res.len() == block.replicas as usize {
+                if res.len() == replicas as usize {
                     break;
                 }
             }
@@ -86,7 +82,7 @@ impl WorkerPolicy for LocalWorkerPolicy {
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
         count: Option<usize>,
-        exclude_workers: Option<HashSet<u32>>,
+        exclude_workers: Vec<u32>,
     ) -> CommonResult<Vec<WorkerAddress>> {
         // Since you do not rely on block information, you cannot judge the local worker, and use the polling strategy directly
         self.inner.choose_workers(workers, count, exclude_workers)

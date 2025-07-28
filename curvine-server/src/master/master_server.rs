@@ -12,31 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused)]
-
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
 use crate::master::fs::{FsRetryCache, MasterActor, MasterFilesystem};
 use crate::master::journal::JournalSystem;
-use crate::master::mount::MountManager;
 use crate::master::router_handler::MasterRouterHandler;
-use crate::master::MasterMetrics;
 use crate::master::SyncMountManager;
 use crate::master::{LoadManager, MasterHandler};
-use curvine_common::conf::{ClusterConf, MasterConf};
+use crate::master::{MasterMetrics, MasterMonitor, SyncWorkerManager};
+use curvine_common::conf::ClusterConf;
 use curvine_web::server::{WebHandlerService, WebServer};
-use orpc::common::{DurationUnit, Logger, Metrics};
+use orpc::common::{LocalTime, Logger, Metrics};
 use orpc::handler::HandlerService;
 use orpc::io::net::ConnState;
 use orpc::runtime::{RpcRuntime, Runtime};
-use orpc::server::RpcServer;
+use orpc::server::{RpcServer, ServerStateListener};
 use orpc::CommonResult;
 
 static MASTER_METRICS: OnceCell<MasterMetrics> = OnceCell::new();
 
 #[derive(Clone)]
-pub struct MasterHandlerService {
+pub struct MasterService {
     conf: ClusterConf,
     fs: MasterFilesystem,
     retry_cache: Option<FsRetryCache>,
@@ -45,7 +42,7 @@ pub struct MasterHandlerService {
     rt: Arc<Runtime>,
 }
 
-impl MasterHandlerService {
+impl MasterService {
     pub fn new(
         conf: ClusterConf,
         fs: MasterFilesystem,
@@ -63,9 +60,25 @@ impl MasterHandlerService {
             rt,
         }
     }
+
+    pub fn clone_worker_manager(&self) -> SyncWorkerManager {
+        self.fs.worker_manager.clone()
+    }
+
+    pub fn conf(&self) -> &ClusterConf {
+        &self.conf
+    }
+
+    pub fn clone_rt(&self) -> Arc<Runtime> {
+        self.rt.clone()
+    }
+
+    pub fn master_monitor(&self) -> MasterMonitor {
+        self.fs.master_monitor.clone()
+    }
 }
 
-impl HandlerService for MasterHandlerService {
+impl HandlerService for MasterService {
     type Item = MasterHandler;
 
     fn has_conn_state(&self) -> bool {
@@ -85,7 +98,7 @@ impl HandlerService for MasterHandlerService {
     }
 }
 
-impl WebHandlerService for MasterHandlerService {
+impl WebHandlerService for MasterService {
     type Item = MasterRouterHandler;
 
     fn get_handler(&self) -> Self::Item {
@@ -94,8 +107,9 @@ impl WebHandlerService for MasterHandlerService {
 }
 
 pub struct Master {
-    rpc_server: RpcServer<MasterHandlerService>,
-    web_server: WebServer<MasterHandlerService>,
+    pub start_time: u64,
+    rpc_server: RpcServer<MasterService>,
+    web_server: WebServer<MasterService>,
     journal_system: JournalSystem,
     actor: MasterActor,
     mount_manager: SyncMountManager,
@@ -103,20 +117,15 @@ pub struct Master {
 }
 
 impl Master {
-    pub fn new(conf: ClusterConf) -> CommonResult<Self> {
+    fn new(conf: ClusterConf) -> CommonResult<Self> {
         let mut log = conf.master.log.clone();
         if conf.master.audit_logging_enabled {
             log.targets = vec!["audit".to_string()]
         }
+
         Logger::init(log);
-
         Metrics::init();
-        if MASTER_METRICS.get().is_none() {
-            let metrics = MasterMetrics::new()?;
-            MASTER_METRICS.set(metrics).unwrap();
-        }
-
-        conf.print();
+        MASTER_METRICS.get_or_init(|| MasterMetrics::new().unwrap());
 
         // step1: Create a journal system, the journal system determines how to create a fs dir.
         let journal_system = JournalSystem::from_conf(&conf)?;
@@ -142,8 +151,8 @@ impl Master {
         ));
 
         // step3: Create rpc server.
-        let retry_cache = Self::create_fs_retry_cache(&conf.master);
-        let service = MasterHandlerService::new(
+        let retry_cache = FsRetryCache::with_conf(&conf.master);
+        let service = MasterService::new(
             conf.clone(),
             fs,
             retry_cache,
@@ -160,6 +169,7 @@ impl Master {
         let web_server = WebServer::new(web_conf, service);
 
         Ok(Self {
+            start_time: LocalTime::mills(),
             rpc_server,
             web_server,
             journal_system,
@@ -169,47 +179,40 @@ impl Master {
         })
     }
 
+    pub fn with_conf(conf: ClusterConf) -> CommonResult<Self> {
+        Self::new(conf)
+    }
+
+    pub async fn start(self) -> ServerStateListener {
+        // step 1: Start journal_system, raft server and raft node will be started internally
+        let mut listener = self.journal_system.start().await.unwrap();
+        listener.wait_role().await.unwrap();
+
+        // step 2: Start rpc server
+        let mut rpc_status = self.rpc_server.start();
+        rpc_status.wait_running().await.unwrap();
+
+        // step3: Start the web server
+        self.web_server.start();
+
+        // step4: Start master actor
+        self.actor.start();
+
+        // reload mount info
+        self.mount_manager.read().restore();
+
+        // step5: Start load manager
+        self.load_manager.start();
+
+        rpc_status
+    }
+
     pub fn block_on_start(self) {
-        let rt = self.rpc_server.new_rt();
+        let rt = self.rpc_server.clone_rt();
         rt.block_on(async move {
-            // step 1: Start journal_system, raft server and raft node will be started internally
-            let mut listener = self.journal_system.start().await.unwrap();
-            listener.wait_role().await.unwrap();
-
-            // step 2: Start rpc server
-            let mut rpc_status = self.rpc_server.start();
-            rpc_status.wait_running().await.unwrap();
-
-            // step3: Start the web server
-            self.web_server.start();
-
-            // step4: Start master actor
-            self.actor.start();
-
-            // reload mountinfo
-            self.mount_manager.read().restore();
-
-            // step5: Start load manager
-            self.load_manager.start();
-
-            rpc_status.wait_stop().await.unwrap();
+            let mut status = self.start().await;
+            status.wait_stop().await.unwrap();
         });
-    }
-
-    pub fn create_fs_retry_cache(conf: &MasterConf) -> Option<FsRetryCache> {
-        if conf.retry_cache_enable {
-            let ttl = DurationUnit::from_str(&conf.retry_cache_ttl)
-                .unwrap()
-                .as_duration();
-            let cache = FsRetryCache::new(conf.retry_cache_size, ttl);
-            Some(cache)
-        } else {
-            None
-        }
-    }
-    // for test
-    pub fn get_fs(&self) -> MasterFilesystem {
-        self.rpc_server.service().fs.clone()
     }
 
     pub fn get_metrics<'a>() -> &'a MasterMetrics {
@@ -223,17 +226,12 @@ impl Master {
         MASTER_METRICS.get_or_init(|| metrics);
     }
 
-    /// Get all active Worker nodes
-    pub async fn get_active_workers(&self) -> Vec<String> {
-        // Get active Worker node from MasterActor
-        // Note: This is a simplified implementation and should actually be obtained from the Master Actor or Worker Manager
-        // Currently, a test address is returned temporarily
-        vec!["localhost:8081".to_string()]
+    // for test
+    pub fn get_fs(&self) -> MasterFilesystem {
+        self.rpc_server.service().fs.clone()
     }
-}
 
-impl Default for Master {
-    fn default() -> Self {
-        Self::new(ClusterConf::format()).unwrap()
+    pub fn service(&self) -> &MasterService {
+        self.rpc_server.service()
     }
 }

@@ -563,7 +563,7 @@ impl LoadManager {
     async fn choose_worker(master_fs: Arc<MasterFilesystem>) -> CommonResult<WorkerAddress> {
         let worker_mgr = master_fs.worker_manager.read();
         let workers = worker_mgr
-            .choose_workers(1, None)
+            .choose_workers(1, vec![])
             .map_err(|e| LoadManagerError::RpcError(format!("Failed to choose workers: {}", e)))?;
 
         if let Some(worker) = workers.first() {

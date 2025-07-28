@@ -26,7 +26,7 @@ use log::info;
 use orpc::common::{Logger, TimeSpent};
 use orpc::io::net::NetUtils;
 use orpc::{err_box, CommonResult};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
@@ -178,7 +178,7 @@ fn run(fs_leader: &MasterFilesystem, worker: &WorkerInfo) -> CommonResult<()> {
         fs_leader.create_file(CreateFileContext::with_path("/journal/b/test.log", true))?;
 
     // Assign block
-    let block = fs_leader.add_block(&status.path, address.clone(), None, HashSet::new())?;
+    let block = fs_leader.add_block(&status.path, address.clone(), None, vec![])?;
 
     // Complete the file.
     let commit = CommitBlock {
@@ -197,7 +197,7 @@ fn run(fs_leader: &MasterFilesystem, worker: &WorkerInfo) -> CommonResult<()> {
     let path = "/journal/append.log";
     fs_leader.create(path, true)?;
 
-    let block = fs_leader.add_block(path, address.clone(), None, HashSet::new())?;
+    let block = fs_leader.add_block(path, address.clone(), None, vec![])?;
     let commit = CommitBlock {
         block_id: block.block.id,
         block_len: 10,
@@ -210,7 +210,7 @@ fn run(fs_leader: &MasterFilesystem, worker: &WorkerInfo) -> CommonResult<()> {
         block_len: 13,
         locations: vec![BlockLocation::with_id(worker.worker_id())],
     };
-    fs_leader.append_file(path, "")?;
+    fs_leader.append_file(CreateFileContext::with_append(path))?;
     fs_leader.complete_file(path, 13, Some(commit), "")?;
 
     Ok(())

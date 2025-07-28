@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
-use crate::master::fs::policy::WorkerPolicyAdapter;
+use crate::master::fs::policy::{ChooseContext, WorkerPolicyAdapter};
 use crate::master::fs::state::{BlockMap, WorkerMap};
 use crate::master::fs::DeleteResult;
 use curvine_common::conf::ClusterConf;
@@ -84,15 +83,9 @@ impl WorkerManager {
         Ok(cmds)
     }
 
-    pub fn choose_worker(
-        &self,
-        block: ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
-    ) -> CommonResult<Vec<WorkerAddress>> {
-        let replicas = block.replicas;
-        let workers =
-            self.worker_policy
-                .choose(self.worker_map.workers(), &block, exclude_workers)?;
+    pub fn choose_worker(&self, ctx: ChooseContext) -> CommonResult<Vec<WorkerAddress>> {
+        let replicas = ctx.replicas;
+        let workers = self.worker_policy.choose(self.worker_map.workers(), ctx)?;
 
         if workers.is_empty() {
             err_box!("No available worker found")
@@ -107,7 +100,7 @@ impl WorkerManager {
     pub fn choose_workers(
         &self,
         count: usize,
-        exclude_workers: Option<HashSet<u32>>,
+        exclude_workers: Vec<u32>,
     ) -> CommonResult<Vec<WorkerAddress>> {
         let workers =
             self.worker_policy

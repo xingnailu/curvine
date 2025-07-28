@@ -41,6 +41,7 @@ mod master_metrics;
 pub use self::master_metrics::*;
 
 mod router_handler;
+pub use self::router_handler::*;
 
 mod rpc_context;
 pub use rpc_context::RpcContext;

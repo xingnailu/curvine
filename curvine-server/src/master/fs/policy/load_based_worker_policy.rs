@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::ValidateAddBlock;
-use crate::master::fs::policy::WorkerPolicy;
+use crate::master::fs::policy::{ChooseContext, WorkerPolicy};
 use curvine_common::state::{WorkerAddress, WorkerInfo};
 use indexmap::IndexMap;
 use orpc::{err_box, CommonResult};
@@ -97,38 +96,20 @@ impl WorkerPolicy for LoadBasedWorkerPolicy {
     fn choose(
         &self,
         workers: &IndexMap<u32, WorkerInfo>,
-        block: &ValidateAddBlock,
-        exclude_workers: Option<HashSet<u32>>,
+        ctx: ChooseContext,
     ) -> CommonResult<Vec<WorkerAddress>> {
         if workers.is_empty() {
             return err_box!("No workers available");
         }
-        if block.replicas < 1 {
+        if ctx.replicas < 1 {
             return err_box!("The number of replicas cannot be 0");
         }
 
         self.select_workers_by_load(
             workers,
-            block.replicas as usize,
-            exclude_workers.as_ref(),
-            Some(block.block_size as u64),
+            ctx.replicas as usize,
+            Some(&ctx.exclude_workers),
+            Some(ctx.block_size as u64),
         )
-    }
-
-    fn choose_workers(
-        &self,
-        workers: &IndexMap<u32, WorkerInfo>,
-        count: Option<usize>,
-        exclude_workers: Option<HashSet<u32>>,
-    ) -> CommonResult<Vec<WorkerAddress>> {
-        if workers.is_empty() {
-            return err_box!("No workers available");
-        }
-        let count = count.unwrap_or(1);
-        if count < 1 {
-            return err_box!("The number of workers to choose cannot be 0");
-        }
-
-        self.select_workers_by_load(workers, count, exclude_workers.as_ref(), None)
     }
 }

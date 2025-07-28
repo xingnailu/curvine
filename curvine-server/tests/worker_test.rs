@@ -37,7 +37,7 @@ fn start_worker() -> ClusterConf {
     conf.worker.data_dir = vec!["[MEM:10MB]../testing/worker-test".to_owned()];
     conf.client.init().unwrap();
 
-    let server = Worker::new(conf.clone()).unwrap();
+    let server = Worker::with_conf(conf.clone()).unwrap();
     thread::spawn(move || server.start_standalone());
     conf
 }
