@@ -14,14 +14,11 @@
 
 use crate::fs::FuseFile;
 use crate::{FuseResult, FUSE_UNKNOWN_INO};
-use dashmap::DashMap;
-use fxhash::FxHasher;
-use orpc::sync::AtomicCounter;
+use orpc::sync::{AtomicCounter, FastDashMap};
 use orpc::sys::RawPtr;
-use std::hash::BuildHasherDefault;
 
 pub struct HandleMap {
-    files: DashMap<u64, RawPtr<FuseFile>, BuildHasherDefault<FxHasher>>,
+    files: FastDashMap<u64, RawPtr<FuseFile>>,
     fh_creator: AtomicCounter,
 }
 
@@ -34,7 +31,7 @@ impl Default for HandleMap {
 impl HandleMap {
     pub fn new() -> Self {
         Self {
-            files: DashMap::with_hasher(BuildHasherDefault::<FxHasher>::default()),
+            files: FastDashMap::default(),
             fh_creator: AtomicCounter::new(0),
         }
     }

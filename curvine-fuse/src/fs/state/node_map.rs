@@ -17,9 +17,8 @@ use crate::{err_fuse, FuseResult, FUSE_PATH_SEPARATOR, FUSE_ROOT_ID, FUSE_UNKNOW
 use curvine_common::conf::FuseConf;
 use curvine_common::fs::Path;
 use log::info;
-use orpc::common::LocalTime;
+use orpc::common::{FastHashMap, LocalTime};
 use orpc::sync::AtomicCounter;
-use orpc::FastHashMap;
 use std::collections::VecDeque;
 use std::time::Duration;
 
