@@ -131,6 +131,10 @@ impl ErrorExt for RaftError {
             ErrorKind::LeaderNotReady => LeaderNotReady(de.into_string()),
         }
     }
+
+    fn should_retry(&self) -> bool {
+        self.retry_leader()
+    }
 }
 
 impl From<CommonError> for RaftError {

@@ -36,6 +36,7 @@ pub struct RaftServer {
 impl RaftServer {
     pub fn with_rt(rt: Arc<Runtime>, conf: &JournalConf) -> Self {
         let mut server_conf = ServerConf::with_hostname(conf.hostname.to_string(), conf.rpc_port);
+        server_conf.name = "curvine-journal".to_string();
         server_conf.enable_splice = false;
         server_conf.enable_send_file = false;
         server_conf.pipe_pool_init_cap = 0;

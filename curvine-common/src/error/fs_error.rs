@@ -164,6 +164,10 @@ impl FsError {
         Self::NotLeaderMaster(ErrorImpl::with_source(error.into()))
     }
 
+    pub fn not_leader(msg: impl Into<String>) -> Self {
+        Self::NotLeaderMaster(ErrorImpl::with_source(msg.into().into()))
+    }
+
     pub fn in_progress(req_id: i64) -> Self {
         let msg = format!("Request {} in progress", req_id);
         Self::InProgress(ErrorImpl::with_source(msg.into()))
@@ -179,8 +183,8 @@ impl FsError {
         Self::Expired(ErrorImpl::with_source(msg.into()))
     }
 
-    pub fn file_exists(msg: impl AsRef<str>) -> Self {
-        let msg = msg.as_ref().to_string();
+    pub fn file_exists(path: impl AsRef<str>) -> Self {
+        let msg = format!("{}  already exists", path.as_ref());
         Self::FileAlreadyExists(ErrorImpl::with_source(msg.into()))
     }
 
@@ -197,6 +201,7 @@ impl FsError {
         let msg = format!("{} is not implemenet", feature.into());
         Self::Unsupported(ErrorImpl::with_source(msg.into()))
     }
+
     // Determine whether the current error allows retry.
     // NotLeaderMaster error indicates that a master switch has occurred and you need to retry access to the next master
     pub fn retry_master(&self) -> bool {
@@ -398,6 +403,10 @@ impl ErrorExt for FsError {
             ErrorKind::Expired => FsError::Expired(de.into_string()),
             ErrorKind::Common => FsError::Common(de.into_string()),
         }
+    }
+
+    fn should_retry(&self) -> bool {
+        self.retry_master()
     }
 }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use crate::conf::ClusterConf;
+use orpc::client::ClientConf as RpcConf;
 use orpc::common::{ByteUnit, DurationUnit, Utils};
 use orpc::io::net::InetAddr;
 use orpc::CommonResult;
@@ -186,6 +187,33 @@ impl ClientConf {
         self.mount_update_ttl = DurationUnit::from_str(&self.mount_update_ttl_str)?.as_duration();
 
         Ok(())
+    }
+
+    pub fn client_rpc_conf(&self) -> RpcConf {
+        let conf = self;
+        RpcConf {
+            io_threads: conf.io_threads,
+            worker_threads: conf.worker_threads,
+
+            conn_retry_max_duration_ms: conf.conn_retry_max_duration_ms,
+            conn_retry_min_sleep_ms: conf.conn_retry_min_sleep_ms,
+            conn_retry_max_sleep_ms: conf.conn_retry_max_sleep_ms,
+
+            io_retry_max_duration_ms: conf.rpc_retry_max_duration_ms,
+            io_retry_min_sleep_ms: conf.rpc_retry_min_sleep_ms,
+            io_retry_max_sleep_ms: conf.rpc_retry_max_sleep_ms,
+
+            close_idle: conf.rpc_close_idle,
+
+            conn_timeout_ms: conf.conn_timeout_ms,
+            rpc_timeout_ms: conf.rpc_timeout_ms,
+            data_timeout_ms: conf.data_timeout_ms,
+
+            conn_size: conf.master_conn_pool_size,
+
+            buffer_size: 128 * 1024,
+            ..Default::default()
+        }
     }
 }
 

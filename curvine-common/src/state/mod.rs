@@ -57,8 +57,8 @@ pub use self::last_block_status::LastBlockStatus;
 mod worker_status;
 pub use self::worker_status::WorkerStatus;
 
-mod create_mode;
-pub use self::create_mode::CreateMode;
+mod create_flag;
+pub use self::create_flag::*;
 
 mod async_cache;
 pub use self::async_cache::*;

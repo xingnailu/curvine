@@ -7,19 +7,11 @@ option java_outer_classname = "CommonProto";
 
 // Define the storage type.
 enum StorageTypeProto {
-STORAGE_TYPE_PROTO_MEM = 0;
-STORAGE_TYPE_PROTO_SSD = 1;
-STORAGE_TYPE_PROTO_HDD = 2;
-STORAGE_TYPE_PROTO_UFS = 3;
-STORAGE_TYPE_PROTO_DISK = 4;
-}
-
-
-// Define the file creation type
-enum CreateModeProto {
-CREATE_MODE_PROTO_CREATE = 1;
-CREATE_MODE_PROTO_OVERWRITE = 2;
-CREATE_MODE_PROTO_APPEND = 4;
+    STORAGE_TYPE_PROTO_MEM = 0;
+    STORAGE_TYPE_PROTO_SSD = 1;
+    STORAGE_TYPE_PROTO_HDD = 2;
+    STORAGE_TYPE_PROTO_UFS = 3;
+    STORAGE_TYPE_PROTO_DISK = 4;
 }
 
 // ttl Expiry Strategy.
@@ -102,8 +94,7 @@ message LocatedBlockProto {
 // All block information in the file.
 message FileBlocksProto {
     required FileStatusProto status = 1;
-    repeated int64 block_ids = 2;
-    map<int64, LocatedBlockProto> block_locs = 3;
+    repeated LocatedBlockProto block_locs = 2;
 }
 
 enum HeartbeatStatusProto {

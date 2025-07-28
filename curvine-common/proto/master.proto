@@ -18,19 +18,22 @@ message MkdirResponse {
     required bool flag = 1;
 }
 
+message CreateFileOptsProto {
+    required int32 create_flag = 1 [default = 1];
+    required bool create_parent = 2;
+
+    required FileTypeProto file_type = 3 [default = FILE_TYPE_PROTO_FILE];
+    required int32 replicas = 4 [default = 1];
+    required int64 block_size = 5 [default = 134217728];
+    map<string, bytes> x_attr = 6;
+    required StoragePolicyProto storage_policy = 7;
+    required string client_name = 8 [default = "localhost"];
+}
+
 // Create a file.
 message CreateFileRequest {
     required string path = 1;
-    required FileTypeProto file_type = 2 [default = FILE_TYPE_PROTO_FILE];
-    required int32 replicas = 3 [default = 1];
-    required int64 block_size = 4 [default = 134217728];
-
-    required bool overwrite = 5 [default = false];
-    required bool create_parent = 6 [default = false];
-
-    map<string, bytes> x_attr = 7;
-    required StoragePolicyProto storage_policy = 8;
-    required string client_name = 9 [default = "localhost"];
+    required CreateFileOptsProto opts = 2;
 }
 
 message CreateFileResponse {
@@ -137,10 +140,9 @@ message GetMasterInfoResponse {
     repeated WorkerInfoProto lost_workers = 14;
 }
 
-// Request master profile information.
 message AppendFileRequest {
     required string path = 1;
-    required string client_name = 2 [default = "localhost"];
+    required CreateFileOptsProto opts = 2;
 }
 
 message AppendFileResponse {

@@ -17,7 +17,6 @@ use crate::state::*;
 use orpc::{try_err, CommonResult};
 use prost::bytes::BytesMut;
 use prost::Message;
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 pub struct ProtoUtils;
@@ -235,29 +234,27 @@ impl ProtoUtils {
     }
 
     pub fn file_blocks_to_pb(src: FileBlocks) -> FileBlocksProto {
-        let block_locs: HashMap<i64, LocatedBlockProto> = src
+        let block_locs: Vec<LocatedBlockProto> = src
             .block_locs
             .into_iter()
-            .map(|x| (x.0, Self::located_block_to_pb(x.1)))
+            .map(Self::located_block_to_pb)
             .collect();
 
         FileBlocksProto {
             status: Self::file_status_to_pb(src.status),
-            block_ids: src.block_ids,
             block_locs,
         }
     }
 
     pub fn file_blocks_from_pb(src: FileBlocksProto) -> FileBlocks {
-        let block_locs: HashMap<i64, LocatedBlock> = src
+        let block_locs: Vec<LocatedBlock> = src
             .block_locs
             .into_iter()
-            .map(|x| (x.0, Self::located_block_from_pb(x.1)))
+            .map(Self::located_block_from_pb)
             .collect();
 
         FileBlocks {
             status: Self::file_status_from_pb(src.status),
-            block_ids: src.block_ids,
             block_locs,
         }
     }

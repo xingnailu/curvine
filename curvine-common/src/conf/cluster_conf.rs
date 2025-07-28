@@ -166,36 +166,14 @@ impl ClusterConf {
 
     pub fn worker_web_conf(&self) -> ServerConf {
         let mut web_conf = ServerConf::with_hostname(&self.worker.hostname, self.worker.web_port);
-        web_conf.name = format!("{}-worker", self.cluster_id);
+        web_conf.name = format!("{}-web", self.cluster_id);
         web_conf.io_threads = self.worker.io_threads;
         web_conf.worker_threads = self.worker.worker_threads;
         web_conf
     }
 
     pub fn client_rpc_conf(&self) -> RpcConf {
-        let conf = &self.client;
-        RpcConf {
-            io_threads: conf.io_threads,
-            worker_threads: conf.worker_threads,
-
-            conn_retry_max_duration_ms: conf.conn_retry_max_duration_ms,
-            conn_retry_min_sleep_ms: conf.conn_retry_min_sleep_ms,
-            conn_retry_max_sleep_ms: conf.conn_retry_max_sleep_ms,
-
-            io_retry_max_duration_ms: conf.rpc_retry_max_duration_ms,
-            io_retry_min_sleep_ms: conf.rpc_retry_min_sleep_ms,
-            io_retry_max_sleep_ms: conf.rpc_retry_max_sleep_ms,
-
-            close_idle: conf.rpc_close_idle,
-
-            conn_timeout_ms: conf.conn_timeout_ms,
-            io_timeout_ms: conf.rpc_timeout_ms,
-
-            conn_size: conf.master_conn_pool_size,
-
-            buffer_size: 128 * 1024,
-            ..Default::default()
-        }
+        self.client.client_rpc_conf()
     }
 
     // Test use

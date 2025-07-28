@@ -143,7 +143,8 @@ impl JournalConf {
             close_idle: self.rpc_close_idle,
 
             conn_timeout_ms: self.conn_timeout_ms,
-            io_timeout_ms: self.io_timeout_ms,
+            rpc_timeout_ms: self.io_timeout_ms,
+            data_timeout_ms: self.io_timeout_ms,
 
             conn_size: self.conn_size,
 

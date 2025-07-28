@@ -17,18 +17,14 @@ use crate::proto::raft::*;
 use crate::raft::raft_error::RaftError;
 use crate::raft::{LibRaftMessage, NodeId, RaftCode, RaftGroup, RaftResult};
 use crate::utils::SerdeUtils;
-use log::debug;
-use orpc::client::{ClientConf, GroupFactory, SyncClient};
+use orpc::client::{ClientConf, ClusterConnector, SyncClient};
 use orpc::io::net::{InetAddr, NodeAddr};
-use orpc::io::retry::TimeBondedRetryBuilder;
-use orpc::message::{BoxMessage, Builder, RefMessage};
+use orpc::message::{Builder, Message, RefMessage};
 use orpc::runtime::{RpcRuntime, Runtime};
 use orpc::CommonResult;
 use prost::Message as PMessage;
 use raft::eraftpb::{ConfChange, ConfChangeType};
-use std::mem;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// Raft message processing client.
 /// Key points of core functions:
@@ -38,29 +34,21 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct RaftClient {
     rt: Arc<Runtime>,
-    factory: Arc<GroupFactory>,
-    timeout: Duration,
-    retry_builder: TimeBondedRetryBuilder,
+    connector: Arc<ClusterConnector>,
 }
 
 impl RaftClient {
     pub fn new(rt: Arc<Runtime>, group: &RaftGroup, conf: ClientConf) -> Self {
-        let timeout = Duration::from_millis(conf.io_timeout_ms);
-        let retry_builder = TimeBondedRetryBuilder::from_conf(&conf);
-
-        let factory = GroupFactory::with_rt(conf, rt.clone());
-
+        let connector = ClusterConnector::with_rt(conf, rt.clone());
         for node in group.peers.values() {
             let node_addr = NodeAddr::new(node.id, &node.hostname, node.port);
 
-            factory.add_node(node_addr).unwrap();
+            connector.add_node(node_addr).unwrap();
         }
 
         Self {
             rt,
-            factory: Arc::new(factory),
-            timeout,
-            retry_builder,
+            connector: Arc::new(connector),
         }
     }
 
@@ -70,28 +58,27 @@ impl RaftClient {
     }
 
     pub fn add_node(&self, id: u64, addr: &InetAddr) -> RaftResult<()> {
-        let node = NodeAddr::new(id, &addr.hostname, addr.port);
-
-        self.factory.add_node(node)?;
+        let node_addr = NodeAddr::new(id, &addr.hostname, addr.port);
+        self.connector.add_node(node_addr)?;
         Ok(())
     }
 
     // Cluster configuration modification, usually used to join the cluster with new nodes.
     pub async fn conf_change(&self, req: ConfChange) -> RaftResult<()> {
-        let _: ConfChangeResponse = self.leader_rpc(RaftCode::ConfChange, &req).await?;
+        let _: ConfChangeResponse = self.leader_rpc(RaftCode::ConfChange, req).await?;
         Ok(())
     }
 
     // Send raft internal message.
     pub async fn send_raft(&self, req: LibRaftMessage) -> CommonResult<()> {
-        let _: RaftResponse = self.leader_rpc(RaftCode::Raft, &req).await?;
+        let _: RaftResponse = self.leader_rpc(RaftCode::Raft, req).await?;
         Ok(())
     }
 
     // Send application layer messages.
     pub async fn send_propose(&self, data: Vec<u8>) -> RaftResult<()> {
         let req = ProposeRequest { data };
-        let _: ProposeResponse = self.leader_rpc(RaftCode::Propose, &req).await?;
+        let _: ProposeResponse = self.leader_rpc(RaftCode::Propose, req).await?;
         Ok(())
     }
 
@@ -108,7 +95,7 @@ impl RaftClient {
             id,
         };
         let header = ConfChangeRequest { change };
-        let _: ConfChangeResponse = self.leader_rpc(RaftCode::ConfChange, &header).await?;
+        let _: ConfChangeResponse = self.leader_rpc(RaftCode::ConfChange, header).await?;
         Ok(())
     }
 
@@ -116,14 +103,22 @@ impl RaftClient {
         let header = PingRequest::default();
         let req = Builder::new_rpc(RaftCode::Ping)
             .proto_header(header)
-            .build()
-            .into_arc();
+            .build();
 
-        let rep_header: PingResponse = self.retry_rpc(id, req).await?;
-        Ok(rep_header)
+        self.retry_rpc::<PingResponse>(id, req).await
     }
 
-    /// Initiate a rpc request to the specified node
+    // Send a request to the leader.
+    pub async fn leader_rpc<T, R>(&self, code: RaftCode, header: T) -> RaftResult<R>
+    where
+        T: PMessage + Default,
+        R: PMessage + Default,
+    {
+        self.connector
+            .proto_rpc::<T, R, RaftError>(code, header)
+            .await
+    }
+
     pub async fn timeout_rpc<R>(
         &self,
         id: u64,
@@ -132,137 +127,27 @@ impl RaftClient {
     where
         R: PMessage + Default,
     {
-        let client = match self.factory.get_client(id).await {
-            Err(e) => return Err((true, e.into())),
-            Ok(v) => v,
-        };
-
-        // Send a request
-        let msg = match client.timeout_rpc(self.timeout, msg).await {
-            Ok(v) => match v.check_error_ext::<RaftError>() {
-                Err(e) => return Err((e.retry_leader(), e)),
-                Ok(_) => v,
+        match self.connector.timeout_rpc::<RaftError>(id, msg).await {
+            Ok(rep) => match rep.parse_header::<R>() {
+                Err(e) => Err((false, e.into())),
+                Ok(v) => Ok(v),
             },
 
-            Err(e) => {
-                client.set_closed();
-                self.factory.remove_client(id);
-                return Err((true, e.into()));
-            }
-        };
-
-        match msg.parse_header::<R>() {
-            Err(e) => Err((false, e.into())),
-            Ok(v) => Ok(v),
+            Err(e) => Err(e),
         }
     }
 
-    // Send a request to the leader.
-    pub async fn leader_rpc<T, R>(&self, code: RaftCode, header: &T) -> RaftResult<R>
-    where
-        T: PMessage + Default,
-        R: PMessage + Default,
-    {
-        let msg = Builder::new_rpc(code)
-            .proto_header_ref(header)
-            .build()
-            .into_arc();
-
-        let mut last_error: Option<RaftError> = None;
-
-        // Send a request to the current leader node.
-        if let Some(id) = self.factory.leader_id() {
-            match self.timeout_rpc::<R>(id, msg.clone()).await {
-                Ok(v) => return Ok(v),
-
-                Err((retry, e)) => {
-                    if !retry {
-                        return Err(e);
-                    } else {
-                        debug!(
-                            "Rpc({}) call failed to leader {}: {}",
-                            msg.req_id(),
-                            self.factory.get_addr_string(id),
-                            e
-                        );
-                        let _ = mem::replace(&mut last_error, Some(e));
-                    }
-                }
-            }
-        }
-
-        // Poll to send requests to all nodes until timeout.
-        let mut policy = self.retry_builder.build();
-        let node_list = self.factory.node_list(false);
-        let mut index = 0;
-        while policy.attempt().await {
-            let id = node_list[index];
-            index = (index + 1) % node_list.len();
-
-            match self.timeout_rpc::<R>(id, msg.clone()).await {
-                Ok(v) => {
-                    self.factory.change_leader(id);
-                    return Ok(v);
-                }
-
-                Err((retry, e)) => {
-                    if !retry {
-                        self.factory.change_leader(id);
-                        return Err(e);
-                    } else {
-                        debug!(
-                            "Rpc({}) call failed to leader {}: {}",
-                            msg.req_id(),
-                            self.factory.get_addr_string(id),
-                            e
-                        );
-                        let _ = mem::replace(&mut last_error, Some(e));
-                    }
-                }
-            }
-        }
-
-        let msg = format!("Failed to determine after {} attempts", policy.count());
-        Err(RaftError::with_opt_msg(last_error, msg))
-    }
-
-    // Send a retry request to the specified node.
-    pub async fn retry_rpc<R>(&self, id: u64, msg: BoxMessage) -> RaftResult<R>
+    pub async fn retry_rpc<R>(&self, id: u64, msg: Message) -> RaftResult<R>
     where
         R: PMessage + Default,
     {
-        let mut policy = self.retry_builder.build();
-        let mut last_error: Option<RaftError> = None;
-        while policy.attempt().await {
-            match self.timeout_rpc::<R>(id, msg.clone()).await {
-                Ok(v) => return Ok(v),
-
-                Err((retry, e)) => {
-                    if !retry {
-                        return Err(e);
-                    } else {
-                        debug!(
-                            "Rpc({}) call failed to leader {}: {}",
-                            msg.req_id(),
-                            self.factory.get_addr_string(id),
-                            e
-                        );
-                        let _ = mem::replace(&mut last_error, Some(e));
-                    }
-                }
-            }
-        }
-
-        let msg = format!(
-            "Failed to determine address for {} after {} attempts",
-            self.factory.get_addr_string(id),
-            policy.count()
-        );
-        Err(RaftError::with_opt_msg(last_error, msg))
+        let rep = self.connector.retry_rpc::<RaftError>(id, msg).await?;
+        let rep_header: R = rep.parse_header()?;
+        Ok(rep_header)
     }
 
     pub fn create_snapshot_client(&self, id: u64) -> RaftResult<SyncClient> {
-        let client = self.factory.create_sync_with_id(id)?;
+        let client = self.connector.create_sync_with_id(id)?;
         Ok(client)
     }
 }

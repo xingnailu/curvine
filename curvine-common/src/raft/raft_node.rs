@@ -498,8 +498,7 @@ where
                 .proto_header(RaftRequest {
                     message: message.clone(),
                 })
-                .build()
-                .into_arc();
+                .build();
 
             let client = self.client.clone();
             self.rt.spawn(async move {

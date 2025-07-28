@@ -18,7 +18,7 @@ use crate::FsResult;
 use orpc::common::ByteUnit;
 use orpc::{err_box, CommonResult};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::ops::Range;
 
 // block location information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,28 +109,59 @@ pub struct LocatedBlock {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FileBlocks {
     pub status: FileStatus,
-    pub block_ids: Vec<i64>,
-    pub block_locs: HashMap<i64, LocatedBlock>,
+    pub block_locs: Vec<LocatedBlock>,
 }
 
 impl FileBlocks {
-    pub fn get_block_id(&self, file_pos: i64) -> FsResult<i64> {
-        let index = file_pos / self.status.block_size;
-        let block_id = match self.block_ids.get(index as usize) {
-            Some(v) => v,
-            None => return err_box!("Not found block for pos {}, index {}", file_pos, index),
-        };
-        Ok(*block_id)
-    }
-
     // According to the file reading location, get the block that needs to be read and the offset in the block.
     pub fn get_read_block(&self, file_pos: i64) -> FsResult<(i64, LocatedBlock)> {
-        let block_id = self.get_block_id(file_pos)?;
-        let locs = match self.block_locs.get(&block_id) {
-            Some(v) => v.clone(),
-            None => return err_box!("Not fond block {}", block_id),
-        };
-        let block_off = file_pos % self.status.block_size;
-        Ok((block_off, locs))
+        let mut start_pos = 0;
+        for block in &self.block_locs {
+            let end_pos = start_pos + block.block.len;
+            if file_pos >= start_pos && file_pos < end_pos {
+                let block_off = file_pos - start_pos;
+                return Ok((block_off, block.clone()));
+            }
+            start_pos = end_pos;
+        }
+
+        err_box!("Not found block for pos {}", file_pos)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SearchFileBlocks {
+    pub status: FileStatus,
+    pub block_locs: Vec<LocatedBlock>,
+    search_off: Vec<Range<i64>>,
+}
+
+impl SearchFileBlocks {
+    pub fn new(file_blocks: FileBlocks) -> Self {
+        let mut search_off = Vec::new();
+        let mut off = 0;
+        for block in &file_blocks.block_locs {
+            let start = off;
+            let end = off + block.block.len;
+            search_off.push(Range { start, end });
+
+            off = end;
+        }
+
+        Self {
+            status: file_blocks.status,
+            block_locs: file_blocks.block_locs,
+            search_off,
+        }
+    }
+
+    pub fn get_read_block(&self, file_pos: i64) -> FsResult<(i64, LocatedBlock)> {
+        let index = self.search_off.partition_point(|x| x.end <= file_pos);
+        if let Some(lc) = self.block_locs.get(index) {
+            let block_off = file_pos - self.search_off[index].start;
+            Ok((block_off, lc.clone()))
+        } else {
+            err_box!("Not found block for pos {}", file_pos)
+        }
     }
 }
