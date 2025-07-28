@@ -21,7 +21,7 @@ use fxhash::FxHasher;
 use moka::policy::EvictionPolicy;
 use moka::sync::{Cache, CacheBuilder};
 use once_cell::sync::OnceCell;
-use orpc::client::{ClientConf, GroupFactory, RpcClient};
+use orpc::client::{ClientConf, ClusterConnector};
 use orpc::common::{Metrics, Utils};
 use orpc::io::net::{InetAddr, NetUtils};
 use orpc::io::IOResult;
@@ -38,7 +38,7 @@ static CLIENT_METRICS: OnceCell<ClientMetrics> = OnceCell::new();
 // 3. Perceive master switching.
 pub struct FsContext {
     pub(crate) conf: ClusterConf,
-    pub(crate) factory: GroupFactory,
+    pub(crate) connector: Arc<ClusterConnector>,
     pub(crate) client_addr: ClientAddress,
     pub(crate) os_cache: CacheManager,
     pub(crate) failed_workers: Cache<u32, WorkerAddress, BuildHasherDefault<FxHasher>>,
@@ -64,9 +64,9 @@ impl FsContext {
         Metrics::init();
         CLIENT_METRICS.get_or_init(|| ClientMetrics::new().unwrap());
 
-        let factory = GroupFactory::with_rt(conf.client_rpc_conf(), rt.clone());
+        let connector = ClusterConnector::with_rt(conf.client_rpc_conf(), rt.clone());
         for node in conf.master_nodes() {
-            factory.add_node(node)?;
+            connector.add_node(node)?;
         }
 
         let os_cache = CacheManager::new(
@@ -82,7 +82,7 @@ impl FsContext {
 
         let context = Self {
             conf,
-            factory,
+            connector: Arc::new(connector),
             client_addr,
             os_cache,
             failed_workers: exclude_workers,
@@ -90,18 +90,26 @@ impl FsContext {
         Ok(context)
     }
 
-    pub async fn block_client(&self, addr: &WorkerAddress) -> IOResult<BlockClient> {
-        let addr = InetAddr::new(addr.hostname.clone(), addr.rpc_port as u16);
-        let client = self.factory.create_client(&addr, false).await?;
-        Ok(BlockClient::new(client, self))
+    pub fn clone_client_name(&self) -> String {
+        self.client_addr.client_name.clone()
     }
 
     pub fn clone_runtime(&self) -> Arc<Runtime> {
-        self.factory.clone_runtime()
+        self.connector.clone_runtime()
+    }
+
+    pub fn rt(&self) -> &Runtime {
+        self.connector.rt()
     }
 
     pub fn is_local_worker(&self, addr: &WorkerAddress) -> bool {
         addr.is_local(&self.client_addr.hostname)
+    }
+
+    pub async fn block_client(&self, addr: &WorkerAddress) -> IOResult<BlockClient> {
+        let addr = InetAddr::new(addr.hostname.clone(), addr.rpc_port as u16);
+        let client = self.connector.create_client(&addr, false).await?;
+        Ok(BlockClient::new(client, self))
     }
 
     pub fn read_chunk_size(&self) -> usize {
@@ -132,40 +140,12 @@ impl FsContext {
         self.conf.client.block_size
     }
 
-    pub fn clone_client_name(&self) -> String {
-        self.client_addr.client_name.clone()
-    }
-
-    pub async fn get_client(&self, id: u64) -> IOResult<RpcClient> {
-        self.factory.get_client(id).await
-    }
-
-    pub fn get_addr_string(&self, id: u64) -> String {
-        self.factory.get_addr_string(id)
-    }
-
-    pub fn remove_client(&self, id: u64) {
-        self.factory.remove_client(id);
-    }
-
-    pub fn leader_id(&self) -> Option<u64> {
-        self.factory.leader_id()
-    }
-
-    pub fn change_leader(&self, id: u64) {
-        self.factory.change_leader(id);
-    }
-
-    pub fn node_list(&self, leader_first: bool) -> Vec<u64> {
-        self.factory.node_list(leader_first)
-    }
-
     pub fn cluster_conf(&self) -> ClusterConf {
         self.conf.clone()
     }
 
     pub fn rpc_conf(&self) -> &ClientConf {
-        self.factory.conf()
+        self.connector.factory().conf()
     }
 
     pub fn clone_os_cache(&self) -> CacheManager {

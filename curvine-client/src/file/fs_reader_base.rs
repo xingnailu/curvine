@@ -16,17 +16,18 @@ use crate::block::BlockReader;
 use crate::file::FsContext;
 use bytes::BytesMut;
 use curvine_common::fs::Path;
-use curvine_common::state::FileBlocks;
+use curvine_common::state::{FileBlocks, SearchFileBlocks};
 use curvine_common::FsResult;
+use orpc::common::FastHashMap;
 use orpc::runtime::{RpcRuntime, Runtime};
-use orpc::{err_box, try_option_mut, FastHashMap};
+use orpc::{err_box, try_option_mut};
 use std::mem;
 use std::sync::Arc;
 
 pub struct FsReaderBase {
     path: Path,
     fs_context: Arc<FsContext>,
-    file_blocks: FileBlocks,
+    file_blocks: SearchFileBlocks,
     pos: i64,
     len: i64,
 
@@ -46,7 +47,7 @@ impl FsReaderBase {
         Self {
             path,
             fs_context,
-            file_blocks,
+            file_blocks: SearchFileBlocks::new(file_blocks),
             pos: 0,
             len,
             cur_reader: None,

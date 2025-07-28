@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::file::{CreateFileOpts, CreateFileOptsBuilder, FsClient, FsContext, FsReader, FsWriter};
+use crate::file::{
+    CreateFileOpts, CreateFileOptsBuilder, FsClient, FsContext, FsReader, FsReaderBase, FsWriter,
+    FsWriterBase,
+};
 use bytes::BytesMut;
 use curvine_common::conf::ClusterConf;
 use curvine_common::error::FsError;
@@ -81,15 +84,45 @@ impl CurvineFileSystem {
 
     pub async fn create(&self, path: &Path, overwrite: bool) -> FsResult<FsWriter> {
         let opts = CreateFileOptsBuilder::with_conf(&self.fs_context.conf.client)
+            .create(true)
             .overwrite(overwrite)
+            .append(false)
             .create_parent(true)
             .build();
         self.create_with_opts(path, opts).await
     }
 
     pub async fn append(&self, path: &Path) -> FsResult<FsWriter> {
-        let status = self.fs_client.append(path).await?;
+        let opts = CreateFileOptsBuilder::with_conf(&self.fs_context.conf.client)
+            .create(false)
+            .overwrite(false)
+            .append(true)
+            .create_parent(false)
+            .build();
+
+        let status = self.fs_client.append(path, opts).await?;
         let writer = FsWriter::append(self.fs_context.clone(), path.clone(), status);
+        Ok(writer)
+    }
+
+    // Create an FsWriterBase,
+    // FsWriterBase writes data directly to the network without any optimization,
+    // which may be required by model scenarios, such as custom write optimization, etc.
+    pub async fn append_direct(&self, path: &Path, create: bool) -> FsResult<FsWriterBase> {
+        let opts = CreateFileOptsBuilder::with_conf(&self.fs_context.conf.client)
+            .create(create)
+            .overwrite(false)
+            .append(true)
+            .create_parent(true)
+            .build();
+
+        let status = self.fs_client.append(path, opts).await?;
+        let writer = FsWriterBase::new(
+            self.fs_context.clone(),
+            path.clone(),
+            status.file_status,
+            status.last_block,
+        );
         Ok(writer)
     }
 
@@ -97,9 +130,7 @@ impl CurvineFileSystem {
         self.fs_client.exists(path).await
     }
 
-    pub async fn open(&self, path: &Path) -> FsResult<FsReader> {
-        // Keep trying to get files regardless of whether the automatic cache is successful or not
-        let file_blocks = self.fs_client.get_block_locations(path).await?;
+    fn check_read_status(path: &Path, file_blocks: &FileBlocks) -> FsResult<()> {
         if !file_blocks.status.is_complete {
             return err_box!("Cannot read from {} because it is incomplete.", path);
         }
@@ -108,7 +139,22 @@ impl CurvineFileSystem {
             return err_ext!(FsError::file_expired(path.path()));
         }
 
+        Ok(())
+    }
+
+    pub async fn open(&self, path: &Path) -> FsResult<FsReader> {
+        let file_blocks = self.fs_client.get_block_locations(path).await?;
+        Self::check_read_status(path, &file_blocks)?;
+
         let reader = FsReader::new(path.clone(), self.fs_context.clone(), file_blocks)?;
+        Ok(reader)
+    }
+
+    pub async fn open_direct(&self, path: &Path) -> FsResult<FsReaderBase> {
+        let file_blocks = self.fs_client.get_block_locations(path).await?;
+        Self::check_read_status(path, &file_blocks)?;
+
+        let reader = FsReaderBase::new(path.clone(), self.fs_context.clone(), file_blocks);
         Ok(reader)
     }
 
@@ -171,6 +217,10 @@ impl CurvineFileSystem {
 
     pub fn fs_client(&self) -> Arc<FsClient> {
         self.fs_client.clone()
+    }
+
+    pub fn fs_context(&self) -> Arc<FsContext> {
+        self.fs_context.clone()
     }
 
     pub async fn read_string(&self, path: &Path) -> FsResult<String> {

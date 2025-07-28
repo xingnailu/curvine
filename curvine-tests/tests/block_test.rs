@@ -112,7 +112,7 @@ fn replicas_3() -> CommonResult<()> {
 
         let locate = fs.get_block_locations(&path).await?;
         println!("locates {:#?}", locate);
-        for (_, loc) in locate.block_locs {
+        for loc in locate.block_locs {
             assert_eq!(loc.locs.len(), 3);
         }
 

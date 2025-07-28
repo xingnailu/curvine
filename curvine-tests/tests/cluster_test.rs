@@ -57,12 +57,12 @@ fn block_delete_test() -> CommonResult<()> {
     let sync_fs_dir = fs.fs_dir();
     let fs_dir = sync_fs_dir.read();
 
-    for (block_id, _) in file_blocks.block_locs {
+    for lc in file_blocks.block_locs {
         // block id no longer exists.
-        assert!(!(fs_dir.block_exists(block_id)?));
+        assert!(!(fs_dir.block_exists(lc.block.id)?));
 
         // locs have been deleted.
-        let block_locs = fs_dir.get_rocks_store().get_locations(block_id)?;
+        let block_locs = fs_dir.get_rocks_store().get_locations(lc.block.id)?;
         assert!(block_locs.is_empty());
     }
 

@@ -21,40 +21,41 @@ use curvine_common::proto::*;
 use curvine_common::state::*;
 use curvine_common::utils::ProtoUtils;
 use curvine_common::FsResult;
-use log::debug;
-use orpc::io::retry::TimeBondedRetryBuilder;
-use orpc::message::{Builder, Message, RefMessage};
-use orpc::runtime::{RpcRuntime, Runtime};
+use orpc::client::ClusterConnector;
+use orpc::message::MessageBuilder;
+use orpc::runtime::RpcRuntime;
 use orpc::{err_box, ternary};
 use prost::Message as PMessage;
 use std::collections::LinkedList;
-use std::mem;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Clone)]
 pub struct FsClient {
-    rt: Arc<Runtime>,
     context: Arc<FsContext>,
-    timeout: Duration,
-    retry_builder: TimeBondedRetryBuilder,
+    connector: Arc<ClusterConnector>,
 }
 
 impl FsClient {
     pub fn new(context: Arc<FsContext>) -> Self {
-        let timeout = Duration::from_millis(context.conf.client.rpc_timeout_ms);
-        let retry_builder = context.conf.io_retry_policy_builder();
-        let rt = context.clone_runtime();
-        Self {
-            rt,
-            context,
-            timeout,
-            retry_builder,
-        }
+        let connector = context.connector.clone();
+        Self { context, connector }
     }
 
     pub fn context(&self) -> Arc<FsContext> {
         self.context.clone()
+    }
+
+    fn create_file_opts_to_pb(&self, opts: CreateFileOpts) -> CreateFileOptsProto {
+        CreateFileOptsProto {
+            create_flag: opts.create_flag.value(),
+            create_parent: opts.create_parent,
+            file_type: opts.file_type.into(),
+            replicas: opts.replicas,
+            block_size: opts.block_size,
+            x_attr: opts.x_attr,
+            storage_policy: ProtoUtils::storage_policy_to_pb(opts.storage_policy),
+            client_name: self.context.clone_client_name(),
+        }
     }
 
     pub async fn mkdir(&self, path: &Path, create_parent: bool) -> FsResult<bool> {
@@ -81,15 +82,8 @@ impl FsClient {
         opts: CreateFileOpts,
     ) -> FsResult<FileStatus> {
         let header = CreateFileRequest {
-            path: path.path().to_owned(),
-            file_type: opts.file_type.into(),
-            replicas: opts.replicas,
-            block_size: opts.block_size,
-            overwrite: opts.overwrite,
-            create_parent: opts.create_parent,
-            x_attr: opts.x_attr,
-            storage_policy: ProtoUtils::storage_policy_to_pb(opts.storage_policy),
-            client_name: self.context.clone_client_name(),
+            path: path.encode(),
+            opts: self.create_file_opts_to_pb(opts),
         };
 
         let rep_header: CreateFileResponse = self.rpc(RpcCode::CreateFile, header).await?;
@@ -97,10 +91,10 @@ impl FsClient {
         Ok(status)
     }
 
-    pub async fn append(&self, path: &Path) -> FsResult<LastBlockStatus> {
+    pub async fn append(&self, path: &Path, opts: CreateFileOpts) -> FsResult<LastBlockStatus> {
         let header = AppendFileRequest {
-            path: path.path().to_owned(),
-            client_name: self.context.clone_client_name(),
+            path: path.encode(),
+            opts: self.create_file_opts_to_pb(opts),
         };
         let rep_header: AppendFileResponse = self.rpc(RpcCode::AppendFile, header).await?;
         let status = LastBlockStatus {
@@ -210,7 +204,7 @@ impl FsClient {
         let previous = previous.map(|v| ProtoUtils::commit_block_to_pb(v.clone()));
 
         let exclude_workers = {
-            self.context
+            self.context()
                 .failed_workers
                 .iter()
                 .map(|x| ProtoUtils::worker_address_to_pb(&x.1))
@@ -246,7 +240,7 @@ impl FsClient {
         let header = CompleteFileRequest {
             path: path.encode(),
             len,
-            client_name: self.context.clone_client_name(),
+            client_name: self.context().clone_client_name(),
             last,
         };
 
@@ -383,106 +377,19 @@ impl FsClient {
         T: PMessage + Default,
         R: PMessage + Default,
     {
-        let msg = self.leader_rpc(code, header).await?;
-        Ok(msg.parse_header()?)
+        self.connector
+            .proto_rpc::<T, R, FsError>(code, header)
+            .await
     }
 
     pub async fn rpc_bytes(&self, code: RpcCode, header: impl PMessage) -> FsResult<BytesMut> {
-        let msg = self.leader_rpc(code, header).await?;
+        let msg = MessageBuilder::new_rpc(code).proto_header(header).build();
+
+        let msg = self.connector.rpc::<FsError>(msg).await?;
         match msg.header {
             None => Ok(BytesMut::new()),
             Some(v) => Ok(v),
         }
-    }
-
-    pub async fn timeout_rpc(
-        &self,
-        id: u64,
-        msg: impl RefMessage,
-    ) -> Result<Message, (bool, FsError)> {
-        let client = match self.context.get_client(id).await {
-            Err(e) => return Err((true, e.into())),
-            Ok(v) => v,
-        };
-
-        // Send a request
-        match client.timeout_rpc(self.timeout, msg).await {
-            Ok(v) => match v.check_error_ext::<FsError>() {
-                Err(e) => Err((e.retry_master(), e)),
-                Ok(_) => Ok(v),
-            },
-
-            Err(e) => {
-                client.set_closed();
-                self.context.remove_client(id);
-                Err((true, e.into()))
-            }
-        }
-    }
-
-    pub async fn leader_rpc(&self, code: RpcCode, header: impl PMessage) -> FsResult<Message> {
-        let msg = Builder::new_rpc(code)
-            .proto_header(header)
-            .build()
-            .into_arc();
-
-        let mut last_error: Option<FsError> = None;
-        // Send a request to the current leader node.
-        if let Some(id) = self.context.leader_id() {
-            match self.timeout_rpc(id, msg.clone()).await {
-                Ok(v) => return Ok(v),
-
-                Err((retry, e)) => {
-                    if !retry {
-                        return Err(e);
-                    } else {
-                        debug!(
-                            "Rpc({}) call failed to leader {}: {}",
-                            msg.req_id(),
-                            self.context.get_addr_string(id),
-                            e
-                        );
-                        let _ = mem::replace(&mut last_error, Some(e));
-                    }
-                }
-            }
-        }
-
-        // Poll to send requests to all nodes until timeout.
-        // If the client returns that the current node is not the leader, we still perform polling and retry.
-        // At this time, the server may be performing the master selection operation, and it is not advisable to fail directly to return.
-        let mut policy = self.retry_builder.build();
-        let node_list = self.context.node_list(false);
-        let mut index = 0;
-        while policy.attempt().await {
-            let id = node_list[index];
-            index = (index + 1) % node_list.len();
-
-            match self.timeout_rpc(id, msg.clone()).await {
-                Ok(v) => {
-                    self.context.change_leader(id);
-                    return Ok(v);
-                }
-
-                Err((retry, e)) => {
-                    if !retry {
-                        self.context.change_leader(id);
-                        return Err(e);
-                    } else {
-                        debug!(
-                            "Rpc({}) call failed to active master {}: {}",
-                            msg.req_id(),
-                            self.context.get_addr_string(id),
-                            e
-                        );
-                        let _ = mem::replace(&mut last_error, Some(e));
-                    }
-                }
-            }
-        }
-
-        let msg = format!("Failed to determine after {} attempts", policy.count());
-        Err(FsError::with_opt_msg(last_error, msg))
     }
 
     pub fn rpc_blocking<T, R>(&self, code: RpcCode, header: T) -> FsResult<R>
@@ -490,7 +397,7 @@ impl FsClient {
         T: PMessage + Default,
         R: PMessage + Default,
     {
-        self.rt.block_on(self.rpc(code, header))
+        self.context.rt().block_on(self.rpc(code, header))
     }
 
     pub fn client_addr(&self) -> &ClientAddress {

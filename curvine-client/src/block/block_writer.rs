@@ -123,9 +123,10 @@ impl BlockWriter {
         Ok(writer)
     }
 
-    pub async fn write(&mut self, buf: DataSlice) -> FsResult<()> {
+    pub async fn write(&mut self, chunk: DataSlice) -> FsResult<()> {
+        let chunk = chunk.freeze();
         for writer in &mut self.inners {
-            if let Err(e) = writer.write(buf.clone()).await {
+            if let Err(e) = writer.write(chunk.clone()).await {
                 self.fs_context.add_failed_worker(writer.worker_address());
                 return Err(e);
             }

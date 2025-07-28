@@ -21,11 +21,11 @@ use curvine_common::fs::{FileSystem, Path};
 use curvine_common::proto::MountOptions;
 use curvine_common::state::{FileStatus, MasterInfo, MountInfo};
 use curvine_common::FsResult;
-use log::{debug, info, warn};
-use orpc::common::LocalTime;
+use log::{info, warn};
+use orpc::common::{FastHashMap, LocalTime};
 use orpc::runtime::Runtime;
 use orpc::sync::AtomicCounter;
-use orpc::{CommonResult, FastHashMap};
+use orpc::CommonResult;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]

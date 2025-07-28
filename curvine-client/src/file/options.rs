@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct CreateFileOpts {
-    pub overwrite: bool,
+    pub create_flag: CreateFlag,
     pub create_parent: bool,
     pub replicas: i32,
     pub block_size: i64,
@@ -30,7 +30,7 @@ pub struct CreateFileOpts {
 
 #[derive(Debug, Clone)]
 pub struct CreateFileOptsBuilder {
-    pub overwrite: bool,
+    create_flag: CreateFlag,
     create_parent: bool,
     replicas: i32,
     block_size: i64,
@@ -48,7 +48,7 @@ impl Default for CreateFileOptsBuilder {
 impl CreateFileOptsBuilder {
     pub fn new() -> Self {
         Self {
-            overwrite: false,
+            create_flag: CreateFlag::default(),
             create_parent: false,
             replicas: 1,
             block_size: (64 * ByteUnit::MB) as i64,
@@ -60,7 +60,7 @@ impl CreateFileOptsBuilder {
 
     pub fn with_conf(conf: &ClientConf) -> Self {
         Self {
-            overwrite: false,
+            create_flag: CreateFlag::default(),
             create_parent: false,
             replicas: conf.replicas,
             block_size: conf.block_size,
@@ -74,8 +74,35 @@ impl CreateFileOptsBuilder {
         }
     }
 
+    pub fn create_flags(mut self, create_flag: CreateFlag) -> Self {
+        self.create_flag = create_flag;
+        self
+    }
+
+    pub fn create(mut self, create: bool) -> Self {
+        if create {
+            self.create_flag = CreateFlag::new(self.create_flag.value() | CreateFlag::CRATE);
+        } else {
+            self.create_flag = CreateFlag::new(self.create_flag.value() & !CreateFlag::CRATE);
+        }
+        self
+    }
+
     pub fn overwrite(mut self, overwrite: bool) -> Self {
-        self.overwrite = overwrite;
+        if overwrite {
+            self.create_flag = CreateFlag::new(self.create_flag.value() | CreateFlag::OVERWRITE);
+        } else {
+            self.create_flag = CreateFlag::new(self.create_flag.value() & !CreateFlag::OVERWRITE);
+        }
+        self
+    }
+
+    pub fn append(mut self, append: bool) -> Self {
+        if append {
+            self.create_flag = CreateFlag::new(self.create_flag.value() | CreateFlag::APPEND);
+        } else {
+            self.create_flag = CreateFlag::new(self.create_flag.value() & !CreateFlag::APPEND);
+        }
         self
     }
 
@@ -126,7 +153,7 @@ impl CreateFileOptsBuilder {
 
     pub fn build(self) -> CreateFileOpts {
         CreateFileOpts {
-            overwrite: self.overwrite,
+            create_flag: self.create_flag,
             create_parent: self.create_parent,
             replicas: self.replicas,
             block_size: self.block_size,
