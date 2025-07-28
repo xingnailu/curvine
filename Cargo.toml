@@ -19,7 +19,8 @@ members = [
     "curvine-fuse",
     "curvine-web",
     "curvine-ufs",
-    "curvine-cli"
+    "curvine-cli",
+    "curvine-shuffle"
 ]
 
 [workspace.package]
@@ -37,6 +38,7 @@ curvine-ufs = { path = "curvine-ufs" }
 curvine-tests = { path = "curvine-tests" }
 curvine-fuse = { path = "curvine-fuse" }
 curvine-web = { path = "curvine-web" }
+curvine-shuffle = { path = "curvine-shuffle" }
 
 # The most important library start
 
@@ -135,3 +137,4 @@ slog = "2.7.0"
 slog-stdlog = "4.1.0"
 num-bigint = "0.4.6"
 bigdecimal = "0.4.8"
+bitvec = "1.0.1"
