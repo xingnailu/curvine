@@ -53,8 +53,7 @@ impl WorkerDataDir {
     }
 
     fn parse_stg_type(str: &str) -> StorageType {
-        let res = StorageType::from_str_name(str);
-        res.unwrap_or(StorageType::Disk)
+        StorageType::from_str_name(str)
     }
 
     pub fn from_str(str: &str) -> CommonResult<Self> {

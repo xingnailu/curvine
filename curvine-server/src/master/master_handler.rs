@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::CreateFileContext;
+use crate::master::fs::context::{CreateFileContext, MkdirContext};
 use crate::master::fs::{FsRetryCache, MasterFilesystem, OperationStatus};
 use crate::master::load::{LoadManager, MasterLoadService};
 use crate::master::SyncMountManager;
@@ -90,7 +90,8 @@ impl MasterHandler {
         let header: MkdirRequest = ctx.parse_header()?;
         ctx.set_audit(Some(header.path.to_string()), None);
 
-        let flag = self.fs.mkdir(header.path, header.create_parent)?;
+        let context = MkdirContext::from_opts(header.path, header.opts);
+        let flag = self.fs.mkdir_with_ctx(context)?;
         let rep_header = MkdirResponse { flag };
         ctx.response(rep_header)
     }
@@ -104,7 +105,7 @@ impl MasterHandler {
             return self.fs.file_status(context.path);
         }
 
-        let res = self.fs.create_file(context);
+        let res = self.fs.create_with_ctx(context);
         self.set_req_cache(req_id, res)
     }
 

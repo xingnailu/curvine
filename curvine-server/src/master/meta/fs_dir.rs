@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::CreateFileContext;
+use crate::master::fs::context::{CreateFileContext, MkdirContext};
 use crate::master::fs::DeleteResult;
 use crate::master::journal::{JournalEntry, JournalWriter};
 use crate::master::meta::inode::InodeView::{Dir, File};
@@ -78,19 +78,19 @@ impl FsDir {
         Ok(id)
     }
 
-    pub fn mkdir(&mut self, mut inp: InodePath) -> FsResult<InodePath> {
+    pub fn mkdir(&mut self, mut inp: InodePath, ctx: MkdirContext) -> FsResult<InodePath> {
         // Create parent directory
-        inp = self.create_parent_dir(inp)?;
+        inp = self.create_parent_dir(inp, ctx.parent())?;
 
         // Create the final directory.
-        inp = self.create_single_dir(inp)?;
+        inp = self.create_single_dir(inp, ctx)?;
         Ok(inp)
     }
 
     // Create the first subdirectory that does not exist.
     // 1. If all directories on the path already exist, skip and return successful.
     // 2. If the parent directory does not exist, an error is returned.
-    fn create_single_dir(&mut self, mut inp: InodePath) -> FsResult<InodePath> {
+    fn create_single_dir(&mut self, mut inp: InodePath, ctx: MkdirContext) -> FsResult<InodePath> {
         let op_ms = LocalTime::mills();
 
         if inp.is_full() || inp.is_root() {
@@ -100,7 +100,8 @@ impl FsDir {
         let pos = inp.existing_len() - 1;
         let name = inp.get_component(pos + 1)?;
 
-        let dir = InodeDir::new(self.next_inode_id()?, name, LocalTime::mills() as i64);
+        let dir =
+            InodeDir::with_context(self.next_inode_id()?, name, LocalTime::mills() as i64, ctx);
 
         inp = self.add_last_inode(inp, Dir(dir))?;
         self.journal_writer.log_mkdir(op_ms, &inp)?;
@@ -109,7 +110,11 @@ impl FsDir {
     }
 
     // Create all previous directories that may be missing on the path.
-    fn create_parent_dir(&mut self, mut inp: InodePath) -> FsResult<InodePath> {
+    fn create_parent_dir(
+        &mut self,
+        mut inp: InodePath,
+        context: MkdirContext,
+    ) -> FsResult<InodePath> {
         let mut index = inp.existing_len();
 
         // The parent directory already exists and does not need to be created.
@@ -118,7 +123,7 @@ impl FsDir {
         }
 
         while index <= inp.len() - 2 {
-            inp = self.create_single_dir(inp)?;
+            inp = self.create_single_dir(inp, context.clone())?;
             index += 1;
         }
 
@@ -259,10 +264,10 @@ impl FsDir {
         }
 
         // Create a directory that does not exist.
-        inp = self.create_parent_dir(inp)?;
+        inp = self.create_parent_dir(inp, context.dir_context())?;
 
         // Create an inode file node.
-        let file = InodeFile::from_context(
+        let file = InodeFile::with_context(
             self.inode_id.next()?,
             inp.name(),
             LocalTime::mills() as i64,

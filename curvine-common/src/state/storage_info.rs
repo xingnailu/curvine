@@ -45,14 +45,13 @@ impl StorageType {
         }
     }
 
-    pub fn from_str_name(value: &str) -> Option<Self> {
+    pub fn from_str_name(value: &str) -> Self {
         match value.to_uppercase().as_str() {
-            "MEM" => Some(Self::Mem),
-            "SSD" => Some(Self::Ssd),
-            "HDD" => Some(Self::Hdd),
-            "UFS" => Some(Self::Ufs),
-            "DISK" => Some(Self::Disk),
-            _ => None,
+            "MEM" => Self::Mem,
+            "SSD" => Self::Ssd,
+            "HDD" => Self::Hdd,
+            "UFS" => Self::Ufs,
+            _ => Self::Disk,
         }
     }
 }

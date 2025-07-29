@@ -12,27 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::meta::feature::Feature;
 use serde::{Deserialize, Serialize};
 
 // File and directory permission control.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AclFeature {}
-
-impl AclFeature {
-    pub fn new() -> Self {
-        AclFeature {}
-    }
+pub struct AclFeature {
+    pub(crate) owner: String,
+    pub(crate) group: String,
+    pub(crate) mode: u32,
 }
 
-impl Feature for AclFeature {
-    fn name(&self) -> &str {
-        "acl"
+impl AclFeature {
+    pub const DEFAULT_MODE: u32 = 0o777;
+
+    pub fn with_mode(mode: u32) -> Self {
+        Self {
+            owner: "".to_string(),
+            group: "".to_string(),
+            mode,
+        }
     }
 }
 
 impl Default for AclFeature {
     fn default() -> Self {
-        Self::new()
+        Self::with_mode(Self::DEFAULT_MODE)
     }
 }

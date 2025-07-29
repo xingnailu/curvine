@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use curvine_client::file::CurvineFileSystem;
+use curvine_client::file::{CreateFileOptsBuilder, CurvineFileSystem, MkdirOptsBuilder};
 use curvine_common::fs::Path;
 use curvine_common::fs::Writer;
+use curvine_common::state::TtlAction;
 use curvine_common::FsResult;
 use curvine_tests::Testing;
 use log::info;
@@ -70,13 +71,46 @@ async fn mkdir(fs: &CurvineFileSystem) -> CommonResult<()> {
     assert!(flag.is_err());
     info!("mkdir {}, response: {:?}", path, flag);
 
+    // test opts
+    let path = Path::from_str("/fs_test/b/dir_3")?;
+    let opts = MkdirOptsBuilder::with_conf(&fs.conf().client)
+        .create_parent(true)
+        .x_attr("123".to_string(), "xxx".to_string().into_bytes())
+        .ttl_ms(10000)
+        .ttl_action(TtlAction::Delete)
+        .build();
+    let flag = fs.mkdir_with_opts(&path, opts).await;
+    assert!(flag.is_ok());
+
+    let status = fs.get_status(&path).await?;
+    println!("dir status = {:?}", status);
+    assert_eq!(status.mode, 0o755);
+    assert_eq!(status.storage_policy.ttl_ms, 10000);
+    assert_eq!(status.storage_policy.ttl_action, TtlAction::Delete);
+    assert_eq!(status.x_attr.get("123"), Some(&"xxx".as_bytes().to_vec()));
+
     Ok(())
 }
 
 async fn create_file(fs: &CurvineFileSystem) -> CommonResult<()> {
     let path = Path::from_str(PATH)?;
-    let writer = fs.create(&path, true).await?;
-    info!("create file: {}, status: {:?}", path, writer.status());
+    let opts = CreateFileOptsBuilder::with_conf(&fs.conf().client)
+        .create_parent(true)
+        .overwrite(true)
+        .x_attr("123".to_string(), "xxx".to_string().into_bytes())
+        .ttl_ms(10000)
+        .ttl_action(TtlAction::Delete)
+        .build();
+    let writer = fs.create_with_opts(&path, opts).await?;
+    let status = writer.status();
+    info!("create file: {}, status: {:?}", path, status);
+
+    let status = fs.get_status(&path).await?;
+    assert_eq!(status.mode, 0o755);
+    assert_eq!(status.storage_policy.ttl_ms, 10000);
+    assert_eq!(status.storage_policy.ttl_action, TtlAction::Delete);
+    assert_eq!(status.x_attr.get("123"), Some(&"xxx".as_bytes().to_vec()));
+
     Ok(())
 }
 

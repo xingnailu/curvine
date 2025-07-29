@@ -26,6 +26,7 @@ pub struct CreateFileOpts {
     pub file_type: FileType,
     pub x_attr: HashMap<String, Vec<u8>>,
     pub storage_policy: StoragePolicy,
+    pub mode: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub struct CreateFileOptsBuilder {
     file_type: FileType,
     x_attr: HashMap<String, Vec<u8>>,
     storage_policy: StoragePolicy,
+    mode: u32,
 }
 
 impl Default for CreateFileOptsBuilder {
@@ -55,6 +57,7 @@ impl CreateFileOptsBuilder {
             file_type: FileType::File,
             x_attr: HashMap::new(),
             storage_policy: StoragePolicy::default(),
+            mode: ClientConf::DEFAULT_FILE_SYSTEM_MODE,
         }
     }
 
@@ -67,10 +70,10 @@ impl CreateFileOptsBuilder {
             file_type: FileType::File,
             x_attr: Default::default(),
             storage_policy: StoragePolicy {
-                storage_type: StorageType::from_str_name(&conf.storage_type)
-                    .unwrap_or(StorageType::Disk),
+                storage_type: StorageType::from_str_name(&conf.storage_type),
                 ..Default::default()
             },
+            mode: conf.get_mode(),
         }
     }
 
@@ -126,7 +129,7 @@ impl CreateFileOptsBuilder {
         self
     }
 
-    pub fn add_x_attr(mut self, key: String, value: Vec<u8>) -> Self {
+    pub fn x_attr(mut self, key: String, value: Vec<u8>) -> Self {
         self.x_attr.insert(key, value);
         self
     }
@@ -151,6 +154,11 @@ impl CreateFileOptsBuilder {
         self
     }
 
+    pub fn mode(mut self, mode: u32) -> Self {
+        self.mode = mode;
+        self
+    }
+
     pub fn build(self) -> CreateFileOpts {
         CreateFileOpts {
             create_flag: self.create_flag,
@@ -160,6 +168,85 @@ impl CreateFileOptsBuilder {
             file_type: self.file_type,
             x_attr: self.x_attr,
             storage_policy: self.storage_policy,
+            mode: self.mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MkdirOpts {
+    pub create_parent: bool,
+    pub x_attr: HashMap<String, Vec<u8>>,
+    pub storage_policy: StoragePolicy,
+    pub mode: u32,
+}
+
+pub struct MkdirOptsBuilder {
+    create_parent: bool,
+    x_attr: HashMap<String, Vec<u8>>,
+    storage_policy: StoragePolicy,
+    mode: u32,
+}
+
+impl Default for MkdirOptsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MkdirOptsBuilder {
+    pub fn new() -> Self {
+        Self {
+            create_parent: false,
+            x_attr: HashMap::new(),
+            storage_policy: StoragePolicy::default(),
+            mode: ClientConf::DEFAULT_FILE_SYSTEM_MODE,
+        }
+    }
+
+    pub fn with_conf(conf: &ClientConf) -> Self {
+        Self {
+            create_parent: false,
+            x_attr: HashMap::new(),
+            storage_policy: StoragePolicy {
+                storage_type: StorageType::from_str_name(&conf.storage_type),
+                ..Default::default()
+            },
+            mode: conf.get_mode(),
+        }
+    }
+
+    pub fn create_parent(mut self, flag: bool) -> Self {
+        self.create_parent = flag;
+        self
+    }
+
+    pub fn x_attr(mut self, key: String, value: Vec<u8>) -> Self {
+        self.x_attr.insert(key, value);
+        self
+    }
+
+    pub fn storage_type(mut self, t: StorageType) -> Self {
+        self.storage_policy.storage_type = t;
+        self
+    }
+
+    pub fn ttl_ms(mut self, ms: i64) -> Self {
+        self.storage_policy.ttl_ms = ms;
+        self
+    }
+
+    pub fn ttl_action(mut self, action: TtlAction) -> Self {
+        self.storage_policy.ttl_action = action;
+        self
+    }
+
+    pub fn build(self) -> MkdirOpts {
+        MkdirOpts {
+            create_parent: self.create_parent,
+            x_attr: self.x_attr,
+            storage_policy: self.storage_policy,
+            mode: self.mode,
         }
     }
 }

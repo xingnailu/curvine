@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::fs::context::{CreateFileContext, ValidateAddBlock};
+use crate::master::fs::context::{CreateFileContext, MkdirContext, ValidateAddBlock};
 use crate::master::fs::policy::ChooseContext;
 use crate::master::journal::JournalSystem;
 use crate::master::meta::inode::{InodePath, InodeView, PATH_SEPARATOR};
@@ -71,9 +71,9 @@ impl MasterFilesystem {
         fs_dir.print_tree();
     }
 
-    pub fn mkdir<T: AsRef<str>>(&self, path: T, create_parent: bool) -> FsResult<bool> {
+    pub fn mkdir_with_ctx(&self, ctx: MkdirContext) -> FsResult<bool> {
         let mut fs_dir = self.fs_dir.write();
-        let inp = Self::resolve_path(&fs_dir, path.as_ref())?;
+        let inp = Self::resolve_path(&fs_dir, &ctx.path)?;
 
         // Creation of root directory is not allowed
         if inp.is_root() {
@@ -85,12 +85,17 @@ impl MasterFilesystem {
         }
 
         // Check whether the directory can be created recursively.
-        if !create_parent {
+        if !ctx.create_parent {
             Self::check_parent(&inp)?;
         }
 
-        let _ = fs_dir.mkdir(inp)?;
+        let _ = fs_dir.mkdir(inp, ctx)?;
         Ok(true)
+    }
+
+    pub fn mkdir<T: AsRef<str>>(&self, path: T, create_parent: bool) -> FsResult<bool> {
+        let ctx = MkdirContext::with_path(path, create_parent);
+        self.mkdir_with_ctx(ctx)
     }
 
     pub fn delete<T: AsRef<str>>(&self, path: T, recursive: bool) -> FsResult<bool> {
@@ -145,21 +150,19 @@ impl MasterFilesystem {
     }
 
     pub fn create<T: AsRef<str>>(&self, path: T, create_parent: bool) -> FsResult<FileStatus> {
-        let context = CreateFileContext::with_path(path, create_parent);
-        self.create_file(context)
+        let ctx = CreateFileContext::with_path(path, create_parent);
+        self.create_with_ctx(ctx)
     }
 
-    pub fn create_file(&self, context: CreateFileContext) -> FsResult<FileStatus> {
-        if !context.create() {
-            return err_box!("Flag error {}, cannot create file", context.create_flag);
+    pub fn create_with_ctx(&self, ctx: CreateFileContext) -> FsResult<FileStatus> {
+        if !ctx.create() {
+            return err_box!("Flag error {}, cannot create file", ctx.create_flag);
         }
 
         // Check the path length
-        self.check_path_length(&context.path)?;
+        self.check_path_length(&ctx.path)?;
 
-        if context.replicas < self.conf.min_replication
-            || context.replicas >= self.conf.max_replication
-        {
+        if ctx.replicas < self.conf.min_replication || ctx.replicas >= self.conf.max_replication {
             return err_box!(
                 "The number of replicas needs to be between {} and {}",
                 self.conf.min_replication,
@@ -167,9 +170,7 @@ impl MasterFilesystem {
             );
         }
 
-        if context.block_size < self.conf.min_block_size
-            || context.block_size >= self.conf.max_block_size
-        {
+        if ctx.block_size < self.conf.min_block_size || ctx.block_size >= self.conf.max_block_size {
             return err_box!(
                 "Block size needs to be between {} and {}",
                 self.conf.min_block_size,
@@ -178,7 +179,7 @@ impl MasterFilesystem {
         }
 
         let mut fs_dir = self.fs_dir.write();
-        let inp = Self::resolve_path(&fs_dir, &context.path)?;
+        let inp = Self::resolve_path(&fs_dir, &ctx.path)?;
 
         if let Some(inode) = inp.get_last_inode() {
             if inode.is_dir() {
@@ -186,11 +187,11 @@ impl MasterFilesystem {
             }
         }
 
-        if !context.create_parent {
+        if !ctx.create_parent {
             Self::check_parent(&inp)?;
         }
 
-        let inp = fs_dir.create_file(inp, context)?;
+        let inp = fs_dir.create_file(inp, ctx)?;
         let status = fs_dir.file_status(&inp)?;
 
         Ok(status)
@@ -198,25 +199,25 @@ impl MasterFilesystem {
 
     pub fn append_file(
         &self,
-        context: CreateFileContext,
+        ctx: CreateFileContext,
     ) -> FsResult<(Option<LocatedBlock>, FileStatus)> {
-        if !context.append() {
-            return err_box!("Flag error {}, cannot append file", context.create_flag);
+        if !ctx.append() {
+            return err_box!("Flag error {}, cannot append file", ctx.create_flag);
         }
 
         let mut fs_dir = self.fs_dir.write();
-        let inp = Self::resolve_path(&fs_dir, &context.path)?;
+        let inp = Self::resolve_path(&fs_dir, &ctx.path)?;
 
         if inp.get_last_inode().is_none() {
-            if context.create() {
+            if ctx.create() {
                 drop(fs_dir);
-                let status = self.create_file(context)?;
+                let status = self.create_with_ctx(ctx)?;
                 Ok((None, status))
             } else {
                 err_ext!(FsError::file_not_found(inp.path()))
             }
         } else {
-            let (last_block, file_status) = fs_dir.append_file(&inp, &context.client_name)?;
+            let (last_block, file_status) = fs_dir.append_file(&inp, &ctx.client_name)?;
 
             let last_block = if let Some(last_block) = last_block {
                 let block_locs = fs_dir.get_block_locations(last_block.id)?;

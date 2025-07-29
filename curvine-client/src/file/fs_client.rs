@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::file::{CreateFileOpts, CreateFileOptsBuilder, FsContext};
+use crate::file::{CreateFileOpts, CreateFileOptsBuilder, FsContext, MkdirOpts};
 use bytes::BytesMut;
 use curvine_common::conf::{UfsConf, UfsConfBuilder};
 use curvine_common::error::FsError;
@@ -55,13 +55,19 @@ impl FsClient {
             x_attr: opts.x_attr,
             storage_policy: ProtoUtils::storage_policy_to_pb(opts.storage_policy),
             client_name: self.context.clone_client_name(),
+            mode: opts.mode,
         }
     }
 
-    pub async fn mkdir(&self, path: &Path, create_parent: bool) -> FsResult<bool> {
+    pub async fn mkdir(&self, path: &Path, opts: MkdirOpts) -> FsResult<bool> {
         let header = MkdirRequest {
             path: path.encode(),
-            create_parent,
+            opts: MkdirOptsProto {
+                create_parent: opts.create_parent,
+                x_attr: opts.x_attr,
+                storage_policy: ProtoUtils::storage_policy_to_pb(opts.storage_policy),
+                mode: opts.mode,
+            },
         };
 
         let rep_header: MkdirResponse = self.rpc(RpcCode::Mkdir, header).await?;

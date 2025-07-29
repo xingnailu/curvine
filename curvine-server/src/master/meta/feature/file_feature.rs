@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::meta::feature::{WriteFeature, XAttrFeature};
+use crate::master::meta::feature::{AclFeature, WriteFeature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::mem;
@@ -20,30 +20,31 @@ use std::mem;
 // File extension function.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileFeature {
-    pub(crate) x_attrs: XAttrFeature,
+    pub(crate) x_attr: HashMap<String, Vec<u8>>,
     pub(crate) file_write: Option<WriteFeature>,
+    pub(crate) acl: AclFeature,
 }
 
 impl FileFeature {
     pub fn new() -> Self {
         Self {
-            x_attrs: XAttrFeature::default(),
+            x_attr: HashMap::default(),
             file_write: None,
+            acl: AclFeature::default(),
         }
     }
 
     pub fn add_attr<K: AsRef<str>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
-        self.x_attrs
-            .attrs
+        self.x_attr
             .insert(key.as_ref().to_string(), Vec::from(value.as_ref()));
     }
 
     pub fn remove_attr<K: AsRef<str>>(&mut self, key: K) {
-        self.x_attrs.attrs.remove(key.as_ref());
+        self.x_attr.remove(key.as_ref());
     }
 
     pub fn set_attrs(&mut self, map: HashMap<String, Vec<u8>>) {
-        self.x_attrs.attrs = map
+        self.x_attr = map
     }
 
     pub fn set_writing(&mut self, client_name: String) {
@@ -54,8 +55,17 @@ impl FileFeature {
         let _ = self.file_write.take();
     }
 
-    pub fn all_attrs(&self) -> &HashMap<String, Vec<u8>> {
-        &self.x_attrs.attrs
+    pub fn all_attr(&self) -> &HashMap<String, Vec<u8>> {
+        &self.x_attr
+    }
+
+    pub fn set_mode(&mut self, mode: u32) {
+        self.acl.mode = mode;
+    }
+
+    pub fn set_user(&mut self, user: impl Into<String>, group: impl Into<String>) {
+        self.acl.owner = user.into();
+        self.acl.group = group.into();
     }
 }
 

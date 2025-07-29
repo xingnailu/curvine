@@ -148,10 +148,16 @@ pub struct ClientConf {
     pub mount_update_ttl: Duration,
     #[serde(alias = "mount_update_ttl")]
     pub mount_update_ttl_str: String,
+
+    pub umask: u32,
 }
 
 impl ClientConf {
     pub const LONG_READ_THRESHOLD_LEN: i64 = 256 * 1024;
+
+    pub const DEFAULT_FILE_SYSTEM_UMASK: u32 = 0o22;
+
+    pub const DEFAULT_FILE_SYSTEM_MODE: u32 = 0o777;
 
     pub fn init(&mut self) -> CommonResult<()> {
         self.block_size = ByteUnit::from_str(&self.block_size_str)?.as_byte() as i64;
@@ -214,6 +220,10 @@ impl ClientConf {
             buffer_size: 128 * 1024,
             ..Default::default()
         }
+    }
+
+    pub fn get_mode(&self) -> u32 {
+        Self::DEFAULT_FILE_SYSTEM_MODE & !self.umask
     }
 }
 
@@ -289,6 +299,8 @@ impl Default for ClientConf {
 
             mount_update_ttl: Default::default(),
             mount_update_ttl_str: "10m".to_string(),
+
+            umask: Self::DEFAULT_FILE_SYSTEM_UMASK,
         };
 
         conf.init().unwrap();

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(unused)]
+use crate::master::fs::context::MkdirContext;
 use crate::master::fs::MasterFilesystem;
 use crate::master::mount::MountTable;
 use crate::master::{self, SyncFsDir};
@@ -95,7 +96,8 @@ impl MountManager {
         }
 
         info!("try create mount point {}", mount_path);
-        self.master_fs.as_ref().unwrap().mkdir(mount_path, true)?;
+        let dir_ctx = MkdirContext::with_path(mount_path, true);
+        self.master_fs.as_ref().unwrap().mkdir_with_ctx(dir_ctx)?;
         Ok(true)
     }
 

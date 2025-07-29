@@ -65,3 +65,6 @@ pub use self::async_cache::*;
 
 mod mount;
 pub use self::mount::*;
+
+mod posix_permission;
+pub use self::posix_permission::*;

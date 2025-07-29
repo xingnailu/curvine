@@ -211,6 +211,10 @@ impl ProtoUtils {
             file_type: status.file_type.into(),
             x_attr: status.x_attr,
             storage_policy: Self::storage_policy_to_pb(status.storage_policy),
+
+            owner: status.owner,
+            group: status.group,
+            mode: status.mode,
         }
     }
 
@@ -230,6 +234,9 @@ impl ProtoUtils {
             file_type: FileType::from(status.file_type),
             x_attr: status.x_attr,
             storage_policy: Self::storage_policy_from_pb(status.storage_policy),
+            owner: status.owner,
+            group: status.group,
+            mode: status.mode,
         }
     }
 

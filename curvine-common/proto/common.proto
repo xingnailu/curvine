@@ -56,6 +56,9 @@ message FileStatusProto {
 
     map<string, bytes> x_attr = 13;
     required StoragePolicyProto storage_policy = 14;
+    required string owner = 15;
+    required string group = 16;
+    required uint32 mode = 17;
 }
 
 // Describe the worker address information.

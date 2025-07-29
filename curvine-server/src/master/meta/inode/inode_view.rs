@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::large_enum_variant)]
+
+use crate::master::meta::feature::AclFeature;
 use crate::master::meta::inode::InodeView::{Dir, File};
 use crate::master::meta::inode::{
     Inode, InodeDir, InodeFile, InodePtr, PATH_SEPARATOR, ROOT_INODE_ID,
@@ -198,11 +201,19 @@ impl InodeView {
         }
     }
 
+    pub fn acl(&self) -> &AclFeature {
+        match self {
+            File(f) => &f.features.acl,
+            Dir(d) => &d.features.acl,
+        }
+    }
+
     pub fn as_ptr(&mut self) -> InodePtr {
         InodePtr::from_ref(self)
     }
 
     pub fn to_file_status(&self, path: &str) -> FileStatus {
+        let acl = self.acl();
         let mut status = FileStatus {
             id: self.id(),
             path: path.to_owned(),
@@ -218,6 +229,9 @@ impl InodeView {
             file_type: FileType::File,
             x_attr: Default::default(),
             storage_policy: Default::default(),
+            owner: acl.owner.to_owned(),
+            group: acl.group.to_owned(),
+            mode: acl.mode,
         };
 
         match self {
@@ -227,13 +241,15 @@ impl InodeView {
                 status.replicas = f.replicas as i32;
                 status.block_size = f.block_size;
                 status.file_type = f.file_type;
-                status.x_attr = f.features.x_attrs.attrs.clone();
+                status.x_attr = f.features.x_attr.clone();
                 status.storage_policy = f.storage_policy.clone();
             }
 
             Dir(d) => {
                 status.file_type = FileType::Dir;
                 status.len = d.children_len() as i64;
+                status.x_attr = d.features.x_attr.clone();
+                status.storage_policy = d.storage_policy.clone();
             }
         }
 

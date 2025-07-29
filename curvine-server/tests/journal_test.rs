@@ -175,7 +175,7 @@ fn run(fs_leader: &MasterFilesystem, worker: &WorkerInfo) -> CommonResult<()> {
 
     // Create a file.
     let status =
-        fs_leader.create_file(CreateFileContext::with_path("/journal/b/test.log", true))?;
+        fs_leader.create_with_ctx(CreateFileContext::with_path("/journal/b/test.log", true))?;
 
     // Assign block
     let block = fs_leader.add_block(&status.path, address.clone(), None, vec![])?;

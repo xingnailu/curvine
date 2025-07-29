@@ -34,6 +34,11 @@ pub struct FileStatus {
     pub file_type: FileType,
     pub x_attr: HashMap<String, Vec<u8>>,
     pub storage_policy: StoragePolicy,
+
+    // ACL permission control
+    pub mode: u32,
+    pub owner: String,
+    pub group: String,
 }
 
 impl FileStatus {

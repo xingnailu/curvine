@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use crate::master::meta::inode::InodePtr;
-use curvine_common::proto::CreateFileOptsProto;
+use curvine_common::conf::ClientConf;
+use curvine_common::proto::{CreateFileOptsProto, MkdirOptsProto};
 use curvine_common::state::{CreateFlag, FileType, StoragePolicy};
 use curvine_common::utils::ProtoUtils;
 use orpc::common::ByteUnit;
@@ -43,6 +44,8 @@ pub struct CreateFileContext {
     pub storage_policy: StoragePolicy,
 
     pub client_name: String,
+
+    pub mode: u32,
 }
 
 impl CreateFileContext {
@@ -57,6 +60,7 @@ impl CreateFileContext {
             x_attr: opts.x_attr,
             storage_policy: ProtoUtils::storage_policy_from_pb(opts.storage_policy),
             client_name: opts.client_name,
+            mode: opts.mode,
         }
     }
 
@@ -71,6 +75,7 @@ impl CreateFileContext {
             storage_policy: Default::default(),
             create_parent,
             client_name: "".to_string(),
+            mode: ClientConf::DEFAULT_FILE_SYSTEM_MODE,
         }
     }
 
@@ -90,5 +95,56 @@ impl CreateFileContext {
 
     pub fn append(&self) -> bool {
         self.create_flag.append()
+    }
+
+    pub fn dir_context(&self) -> MkdirContext {
+        MkdirContext {
+            path: "".to_string(),
+            create_parent: self.create_parent,
+            x_attr: HashMap::default(),
+            storage_policy: StoragePolicy::default(),
+            mode: self.mode,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MkdirContext {
+    pub path: String,
+    pub create_parent: bool,
+    pub x_attr: HashMap<String, Vec<u8>>,
+    pub storage_policy: StoragePolicy,
+    pub mode: u32,
+}
+
+impl MkdirContext {
+    pub fn with_path<T: AsRef<str>>(path: T, create_parent: bool) -> Self {
+        Self {
+            path: path.as_ref().to_string(),
+            create_parent,
+            x_attr: HashMap::default(),
+            storage_policy: StoragePolicy::default(),
+            mode: ClientConf::DEFAULT_FILE_SYSTEM_MODE,
+        }
+    }
+
+    pub fn from_opts(path: String, opts: MkdirOptsProto) -> Self {
+        Self {
+            path,
+            create_parent: opts.create_parent,
+            x_attr: opts.x_attr,
+            storage_policy: ProtoUtils::storage_policy_from_pb(opts.storage_policy),
+            mode: opts.mode,
+        }
+    }
+
+    pub fn parent(&self) -> Self {
+        Self {
+            path: "".to_string(),
+            create_parent: self.create_parent,
+            x_attr: HashMap::default(),
+            storage_policy: StoragePolicy::default(),
+            mode: self.mode,
+        }
     }
 }

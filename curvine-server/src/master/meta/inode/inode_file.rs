@@ -64,7 +64,7 @@ impl InodeFile {
         }
     }
 
-    pub fn from_context(id: i64, name: &str, time: i64, context: CreateFileContext) -> InodeFile {
+    pub fn with_context(id: i64, name: &str, time: i64, context: CreateFileContext) -> InodeFile {
         let mut file = Self {
             id,
             name: name.to_string(),
@@ -87,6 +87,8 @@ impl InodeFile {
         if !context.x_attr.is_empty() {
             file.features.set_attrs(context.x_attr);
         }
+
+        file.features.set_mode(context.mode);
 
         file
     }

@@ -14,7 +14,7 @@
 
 use crate::file::{
     CreateFileOpts, CreateFileOptsBuilder, FsClient, FsContext, FsReader, FsReaderBase, FsWriter,
-    FsWriterBase,
+    FsWriterBase, MkdirOpts, MkdirOptsBuilder,
 };
 use bytes::BytesMut;
 use curvine_common::conf::ClusterConf;
@@ -72,8 +72,15 @@ impl CurvineFileSystem {
         self.fs_context.rpc_conf()
     }
 
+    pub async fn mkdir_with_opts(&self, path: &Path, opts: MkdirOpts) -> FsResult<bool> {
+        self.fs_client.mkdir(path, opts).await
+    }
+
     pub async fn mkdir(&self, path: &Path, create_parent: bool) -> FsResult<bool> {
-        self.fs_client.mkdir(path, create_parent).await
+        let opts = MkdirOptsBuilder::with_conf(&self.fs_context.conf.client)
+            .create_parent(create_parent)
+            .build();
+        self.fs_client.mkdir(path, opts).await
     }
 
     pub async fn create_with_opts(&self, path: &Path, opts: CreateFileOpts) -> FsResult<FsWriter> {

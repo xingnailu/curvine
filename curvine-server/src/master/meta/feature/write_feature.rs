@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::master::meta::feature::Feature;
 use orpc::common::Utils;
 use serde::{Deserialize, Serialize};
 
@@ -31,11 +30,5 @@ impl WriteFeature {
 impl Default for WriteFeature {
     fn default() -> Self {
         Self::new(Utils::rand_str(8))
-    }
-}
-
-impl Feature for WriteFeature {
-    fn name(&self) -> &str {
-        "file_write"
     }
 }
