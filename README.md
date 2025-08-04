@@ -122,7 +122,7 @@ This project requires the following dependencies. Please ensure they are install
 
 ### 📋 Prerequisites
 
-- ​**Rust**: version 1.80 or later ([Installation Guide](https://www.rust-lang.org/tools/install))
+- ​**Rust**: version 1.86 or later ([Installation Guide](https://www.rust-lang.org/tools/install))
 - ​**Protobuf**: version 2.x
 - ​**Maven**: version 3.8 or later ([Install Guide](https://maven.apache.org/install.html))
 - ​**LLVM**: version 12 or later ([Installation Guide](https://llvm.org/docs/GettingStarted.html))
