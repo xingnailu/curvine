@@ -69,6 +69,10 @@ impl Path {
         self.path() == Self::SEPARATOR
     }
 
+    pub fn is_cv(&self) -> bool {
+        matches!(self.scheme(), None | Some("cv"))
+    }
+
     pub fn authority(&self) -> Option<&str> {
         match self.uri.authority() {
             Some(authority) => Some(authority.as_str()),
@@ -140,23 +144,27 @@ impl Path {
     }
 
     pub fn get_possible_mounts(&self) -> Vec<String> {
-        let splits: Vec<&str> = self.path().split(Self::SEPARATOR).collect();
-        let mut res = vec![];
-        if splits.len() <= 1 {
-            return res;
+        let parts: Vec<&str> = self.path().split(Self::SEPARATOR).collect();
+        let mut result = Vec::new();
+
+        if parts.is_empty() {
+            return result;
         }
 
-        let mut p = Self::SEPARATOR.to_owned();
-        for item in &splits[1..] {
-            p = if p == Self::SEPARATOR {
-                format!("{}{}", Self::SEPARATOR, item)
-            } else {
-                format!("{}{}{}", p, Self::SEPARATOR, item)
+        let mut current_path = match self.scheme() {
+            Some(v) => format!("{}://{}", v, self.authority().unwrap_or("")),
+            None => String::from("/"),
+        };
+
+        for part in parts {
+            if !current_path.ends_with('/') {
+                current_path.push('/');
             };
-            res.push(p.to_owned());
+            current_path.push_str(part);
+            result.push(current_path.clone());
         }
 
-        res
+        result
     }
 }
 
@@ -243,8 +251,15 @@ mod tests {
         let p1 = Path::from_str("/a/b/c")?;
         let mnts = p1.get_possible_mounts();
         println!("{:?}", mnts);
-        assert_eq!(mnts, Vec::from(["/a", "/a/b", "/a/b/c"]));
+        assert_eq!(mnts, Vec::from(["/", "/a", "/a/b", "/a/b/c"]));
 
+        let p1 = Path::from_str("s3://bucket/a/b")?;
+        let mnts = p1.get_possible_mounts();
+        println!("{:?}", mnts);
+        assert_eq!(
+            mnts,
+            Vec::from(["s3://bucket/", "s3://bucket/a", "s3://bucket/a/b"])
+        );
         Ok(())
     }
 

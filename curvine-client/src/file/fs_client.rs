@@ -286,20 +286,27 @@ impl FsClient {
         Ok(rep)
     }
 
-    pub async fn get_mount_point(&self, ufs_path: &str) -> FsResult<GetMountPointInfoResponse> {
-        //TODO umount options
+    pub async fn get_mount_point(&self, path: &str) -> FsResult<Option<MountPointInfo>> {
         let req = GetMountPointInfoRequest {
-            ufs_path: Some(ufs_path.to_string()),
-            curvine_path: None, //havn't inuse
+            path: path.to_string(),
         };
 
         let rep: GetMountPointInfoResponse = self.rpc(RpcCode::GetMountInfo, req).await?;
-        Ok(rep)
+        Ok(rep.mount_point)
+    }
+
+    pub async fn get_mount_point_bytes(&self, path: &str) -> FsResult<BytesMut> {
+        let req = GetMountPointInfoRequest {
+            path: path.to_string(),
+        };
+
+        let bytes = self.rpc_bytes(RpcCode::GetMountInfo, req).await?;
+        Ok(bytes)
     }
 
     pub async fn get_ufs_conf(&self, ufs_path: &str) -> FsResult<UfsConf> {
         let resp = self.get_mount_point(ufs_path).await?;
-        let conf = match resp.mount_point {
+        let conf = match resp {
             Some(mount_point) => {
                 let mut ufs_conf_builder = UfsConfBuilder::default();
                 mount_point.properties.iter().for_each(|(k, v)| {
