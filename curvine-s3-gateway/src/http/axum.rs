@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 
 use axum::response::IntoResponse;
+use futures::stream::StreamExt as _; // for map on ReceiverStream
 use futures::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::auth::{sig_v4, AccesskeyStore};
 use crate::s3::s3_api::VRequest;
@@ -287,6 +289,137 @@ impl crate::s3::s3_api::VResponse for Response {
     fn send_header(&mut self) {}
 }
 
+// Streaming VResponse for high-throughput GET object
+struct StreamingResponse {
+    status: std::sync::Arc<tokio::sync::Mutex<u16>>,
+    headers: std::sync::Arc<tokio::sync::Mutex<axum::http::HeaderMap>>,
+    header_ready_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
+}
+
+struct StreamBodyWriter {
+    tx: tokio::sync::mpsc::Sender<bytes::Bytes>,
+}
+
+#[async_trait::async_trait]
+impl crate::utils::io::PollWrite for StreamBodyWriter {
+    async fn poll_write(&mut self, buff: &[u8]) -> Result<usize, std::io::Error> {
+        if buff.is_empty() {
+            return Ok(0);
+        }
+        // Copy into Bytes and send; channel provides backpressure.
+        let bytes = bytes::Bytes::copy_from_slice(buff);
+        self.tx
+            .send(bytes)
+            .await
+            .map_err(|e| std::io::Error::other(format!("stream send error: {}", e)))?;
+        Ok(buff.len())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::s3::s3_api::BodyWriter for StreamingResponse {
+    type BodyWriter<'a>
+        = StreamBodyWriter
+    where
+        Self: 'a;
+
+    async fn get_body_writer(&mut self) -> Result<Self::BodyWriter<'_>, String> {
+        Ok(StreamBodyWriter {
+            tx: self.tx.clone(),
+        })
+    }
+}
+
+impl crate::s3::s3_api::VResponse for StreamingResponse {
+    fn set_status(&mut self, status: u16) {
+        let mut_guard = self.status.clone();
+        // fire-and-forget lock update
+        let _ = futures::executor::block_on(async move {
+            let mut st = mut_guard.lock().await;
+            *st = status;
+        });
+    }
+
+    fn send_header(&mut self) {
+        if let Some(tx) = self.header_ready_tx.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl crate::auth::sig_v4::VHeader for StreamingResponse {
+    fn get_header(&self, key: &str) -> Option<String> {
+        let headers = futures::executor::block_on(self.headers.lock());
+        headers
+            .get(key)
+            .and_then(|v| v.to_str().ok().map(|s| s.to_string()))
+    }
+
+    fn set_header(&mut self, key: &str, val: &str) {
+        let mut headers = futures::executor::block_on(self.headers.lock());
+        let name: axum::http::HeaderName = key.to_string().parse().unwrap();
+        headers.insert(name, val.parse().unwrap());
+    }
+
+    fn delete_header(&mut self, key: &str) {
+        let mut headers = futures::executor::block_on(self.headers.lock());
+        headers.remove(key);
+    }
+
+    fn rng_header(&self, mut cb: impl FnMut(&str, &str) -> bool) {
+        let headers = futures::executor::block_on(self.headers.lock());
+        for (k, v) in headers.iter() {
+            if !cb(k.as_str(), unsafe {
+                std::str::from_utf8_unchecked(v.as_bytes())
+            }) {
+                return;
+            }
+        }
+    }
+}
+
+/// Build an axum streaming response by running S3 GET handler with StreamingResponse
+pub async fn stream_get_object(
+    req: super::axum::Request,
+    obj: std::sync::Arc<dyn crate::s3::s3_api::GetObjectHandler + Send + Sync>,
+) -> axum::response::Response {
+    // Prepare shared state
+    let (tx, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(8);
+    let (hdr_tx, hdr_rx) = tokio::sync::oneshot::channel::<()>();
+    let status = std::sync::Arc::new(tokio::sync::Mutex::new(200u16));
+    let headers = std::sync::Arc::new(tokio::sync::Mutex::new(axum::http::HeaderMap::new()));
+
+    // Spawn the GET handler in background to stream data into channel
+    let mut streaming_resp = StreamingResponse {
+        status: status.clone(),
+        headers: headers.clone(),
+        header_ready_tx: Some(hdr_tx),
+        tx: tx.clone(),
+    };
+    tokio::spawn(async move {
+        crate::s3::s3_api::handle_get_object(req, &mut streaming_resp, &obj).await;
+        // Drop sender to close stream on completion
+        drop(tx);
+    });
+
+    // Wait until headers are set (send_header called) before building response
+    let _ = hdr_rx.await;
+
+    // Build response
+    let st = *status.lock().await;
+    let mut builder = axum::response::Response::builder().status(st);
+    if let Some(hdrs_mut) = builder.headers_mut() {
+        *hdrs_mut = headers.lock().await.clone();
+    }
+
+    // Convert channel into stream body
+    let body_stream = ReceiverStream::from(rx).map(|b| Ok::<_, std::io::Error>(b));
+    let body = axum::body::Body::from_stream(body_stream);
+
+    builder.body(body).unwrap()
+}
+
 pub async fn handle_fn(
     req: axum::extract::Request<axum::body::Body>,
     _next: axum::middleware::Next,
@@ -311,12 +444,97 @@ pub async fn handle_authorization_middleware(
     };
 
     let req = Request::from(req);
-    let base_arg = match crate::auth::sig_v4::extract_args(&req) {
-        Ok(arg) => arg,
-        Err(_) => {
-            return (axum::http::StatusCode::BAD_REQUEST, b"").into_response();
+
+    // Try AWS Signature V4 first, then fall back to V2
+    let auth_result = crate::auth::sig_v4::extract_args(&req);
+
+    if auth_result.is_err() {
+        // Try AWS Signature V2 authentication
+        match crate::auth::sig_v2::extract_v2_args(&req) {
+            Ok(v2_args) => {
+                tracing::debug!(
+                    "Using AWS Signature V2 authentication for access key: {}",
+                    v2_args.access_key
+                );
+
+                // Get secret key for V2 authentication
+                let secretkey = match ak_store.get(&v2_args.access_key).await {
+                    Ok(secretkey) => {
+                        if secretkey.is_none() {
+                            tracing::warn!("V2 auth: access key not found: {}", v2_args.access_key);
+                            return (axum::http::StatusCode::FORBIDDEN, b"").into_response();
+                        }
+                        secretkey.unwrap()
+                    }
+                    Err(_) => {
+                        tracing::error!("V2 auth: failed to retrieve secret key");
+                        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, b"")
+                            .into_response();
+                    }
+                };
+
+                // Parse query parameters for V2 signature verification
+                let mut query_params = std::collections::HashMap::new();
+                if let Some(query_str) = req.request.uri().query() {
+                    for pair in query_str.split('&') {
+                        if let Some(eq_pos) = pair.find('=') {
+                            let key = &pair[..eq_pos];
+                            let value = &pair[eq_pos + 1..];
+                            query_params.insert(key.to_string(), value.to_string());
+                        } else {
+                            // Handle key without value (like "uploads")
+                            query_params.insert(pair.to_string(), String::new());
+                        }
+                    }
+                }
+
+                // Verify V2 signature
+                if let Err(e) = crate::auth::sig_v2::verify_v2_signature(
+                    &v2_args,
+                    &secretkey,
+                    req.method().as_str(),
+                    req.url_path().as_str(),
+                    &query_params,
+                    &req,
+                ) {
+                    tracing::warn!("V2 signature verification failed: {}", e);
+                    return (axum::http::StatusCode::FORBIDDEN, b"").into_response();
+                }
+
+                // Create a V4Head for V2 requests to satisfy middleware expectations
+                // This is a compatibility layer - V2 auth is complete but we need V4Head for handlers
+                let dummy_ksigning = [0u8; 32]; // Dummy signing key for V2 compatibility
+                let dummy_hasher = crate::auth::sig_v4::HmacSha256CircleHasher::new(
+                    dummy_ksigning,
+                    "v2-signature".to_string(),
+                    v2_args.date.clone(),
+                    "us-east-1".to_string(),
+                );
+                let v4head = crate::auth::sig_v4::V4Head::new(
+                    v2_args.signature.clone(),
+                    "us-east-1".to_string(),
+                    v2_args.access_key.clone(),
+                    dummy_hasher,
+                );
+
+                let mut axum_req: axum::http::Request<axum::body::Body> = req.into();
+                axum_req.extensions_mut().insert(v4head);
+
+                tracing::debug!("V2 authentication successful, proceeding to next middleware");
+                return next.run(axum_req).await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Authentication failed: neither V4 nor V2 signature found. V2 error: {:?}. Request method: {}, URI: {}",
+                    e, req.method(), req.url_path()
+                );
+                return (axum::http::StatusCode::BAD_REQUEST, b"").into_response();
+            }
         }
-    };
+    }
+
+    // Continue with V4 authentication
+    let base_arg = auth_result.unwrap();
 
     // Get raw query string for signature calculation
     let mut query = Vec::new();
