@@ -29,6 +29,96 @@ if ! command -v cargo &> /dev/null; then
     exit 1
 fi
 
+# Set up C/C++ compiler environment for RocksDB compilation
+# This fixes "stdbool.h not found" errors during RocksDB build
+export CC=${CC:-gcc}
+export CXX=${CXX:-g++}
+
+# Set C/C++ include paths to ensure standard headers are found
+# Auto-detect GCC include paths for different Linux distributions
+GCC_INCLUDE_PATH=""
+
+# Try to find GCC include directory automatically
+# This covers Ubuntu/Debian, Red Hat/CentOS/Fedora, SUSE, Arch, Alpine etc.
+if command -v gcc &> /dev/null; then
+    # Method 1: Use gcc to get the actual include directory
+    GCC_INCLUDE_PATH=$(gcc -print-file-name=include 2>/dev/null)
+    
+    # Method 2: If method 1 fails, search common patterns
+    if [[ -z "$GCC_INCLUDE_PATH" || ! -d "$GCC_INCLUDE_PATH" ]]; then
+        # Get current architecture
+        CURRENT_ARCH=$(uname -m)
+        
+        # Map architecture names for different distributions
+        case $CURRENT_ARCH in
+            x86_64)
+                ARCH_PATTERNS=(
+                    "x86_64-linux-gnu"      # Ubuntu/Debian
+                    "x86_64-redhat-linux"   # Red Hat/CentOS/Fedora
+                    "x86_64-suse-linux"     # SUSE/openSUSE
+                    "x86_64-pc-linux-gnu"   # Arch Linux
+                    "x86_64-alpine-linux-musl" # Alpine Linux
+                    "x86_64-*"              # Generic x86_64
+                )
+                ;;
+            aarch64|arm64)
+                ARCH_PATTERNS=(
+                    "aarch64-linux-gnu"     # Ubuntu/Debian ARM64
+                    "aarch64-redhat-linux"  # Red Hat ARM64
+                    "aarch64-suse-linux"    # SUSE ARM64
+                    "aarch64-*"             # Generic ARM64
+                )
+                ;;
+            armv7l|armv6l)
+                ARCH_PATTERNS=(
+                    "arm-linux-gnueabihf"   # Ubuntu/Debian ARM32
+                    "armv7hl-redhat-linux"  # Red Hat ARM32
+                    "arm-*"                 # Generic ARM32
+                )
+                ;;
+            *)
+                ARCH_PATTERNS=("*") # Fallback for unknown architectures
+                ;;
+        esac
+        
+        # Search for GCC include directories with architecture-specific patterns
+        for arch_pattern in "${ARCH_PATTERNS[@]}"; do
+            for base_path in "/usr/lib/gcc" "/usr/lib64/gcc"; do
+                pattern="$base_path/$arch_pattern/*/include"
+                # Find the latest version directory for this pattern
+                GCC_INCLUDE_PATH=$(find $pattern -type d 2>/dev/null | sort -V | tail -1)
+                if [[ -n "$GCC_INCLUDE_PATH" && -d "$GCC_INCLUDE_PATH" ]]; then
+                    break 2  # Break out of both loops
+                fi
+            done
+        done
+    fi
+fi
+
+# Apply the include path if found
+if [[ -n "$GCC_INCLUDE_PATH" && -d "$GCC_INCLUDE_PATH" ]]; then
+    # Method 1: Set C/C++ compiler flags (cc-rs crate will read these)
+    export CFLAGS="${CFLAGS} -I$GCC_INCLUDE_PATH"
+    export CXXFLAGS="${CXXFLAGS} -I$GCC_INCLUDE_PATH"
+    export CPPFLAGS="${CPPFLAGS} -I$GCC_INCLUDE_PATH"
+    
+    # Method 2: Set GCC-specific include path variables (more direct)
+    # These are read directly by GCC preprocessor
+    export C_INCLUDE_PATH="${C_INCLUDE_PATH:+$C_INCLUDE_PATH:}$GCC_INCLUDE_PATH"
+    export CPLUS_INCLUDE_PATH="${CPLUS_INCLUDE_PATH:+$CPLUS_INCLUDE_PATH:}$GCC_INCLUDE_PATH"
+    export CPATH="${CPATH:+$CPATH:}$GCC_INCLUDE_PATH"
+    
+    echo "Found GCC include path: $GCC_INCLUDE_PATH"
+    echo "Set compiler environment:"
+    echo "  CFLAGS=$CFLAGS"
+    echo "  C_INCLUDE_PATH=$C_INCLUDE_PATH"
+    echo "  CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH"
+else
+    echo "Warning: Could not find GCC include directory, compilation may fail"
+fi
+
+echo "Using CC=$CC, CXX=$CXX for compilation"
+
 get_arch_name() {
     arch=$(uname -m)
     case $arch in

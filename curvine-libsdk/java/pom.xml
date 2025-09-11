@@ -50,7 +50,7 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>1.7.36</version>
+            <version>1.7.25</version>
             <scope>${dependency.scope}</scope>
         </dependency>
 
@@ -104,13 +104,13 @@
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-http</artifactId>
-            <version>9.4.58.v20241219</version>
+            <version>9.4.57.v20241219</version>
         </dependency>
 
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>9.4.58.v20241219</version>
+            <version>9.4.57.v20241219</version>
         </dependency>
 
         <dependency>
