@@ -3,6 +3,10 @@
 # Default target when running 'make' without arguments
 .DEFAULT_GOAL := help
 
+# Build configuration (可通过命令行覆盖)
+PACKAGES ?= all
+MODE ?= release
+
 # Detect system type and set shell accordingly
 SYSTEM_TYPE := $(shell uname -s)
 IS_UBUNTU := $(shell grep -q -i ubuntu /etc/os-release 2>/dev/null && echo 1 || echo 0)
@@ -23,8 +27,12 @@ help:
 	@echo ""
 	@echo "Building:"
 	@echo "  make build ARGS='<args>'         - Build with specific arguments passed to build.sh"
-	@echo "  make all                         - Same as 'make build'"
+	@echo "  make all                         - Build all packages with all OpenDAL features enabled"
 	@echo "  make format                      - Format code using pre-commit hooks"
+	@echo ""
+	@echo "Build Configuration:"
+	@echo "  PACKAGES=<packages>             - Packages to build (default: all)"
+	@echo "  MODE=<mode>                     - Build mode: release or debug (default: release)"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-build                - Build using Docker compilation image"
@@ -49,11 +57,11 @@ help:
 	@echo "  ARGS='<args>'  - Additional arguments to pass to build.sh"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build                                  - Build entire project in release mode"
+	@echo "  make all                                    - Build all packages with all OpenDAL features"
+	@echo "  make all PACKAGES=core                      - Build core packages (server, client, cli)"
+	@echo "  make all MODE=debug                         - Build in debug mode"
 	@echo "  make build ARGS='-d'                       - Build entire project in debug mode"
 	@echo "  make build ARGS='-p server -p client'       - Build only server and client components"
-	@echo "  make build ARGS='-p object'                  - Build S3 object gateway"
-	@echo "  make build ARGS='--package core --ufs s3'   - Build core packages with S3 native SDK"
 	@echo "  make cargo ARGS='test --verbose'            - Run cargo test with verbose output"
 	@echo "  make csi-docker-fast                        - Build curvine-csi Docker image quickly"
 
@@ -75,10 +83,10 @@ cargo:
 
 # 5. Build through docker compilation image
 docker-build:
-	docker run --rm -v $(PWD):/workspace -w /workspace curvine/curvine-compile:latest make all
+	docker run --rm -v $(PWD):/workspace -w /workspace curvine/curvine-compile:latest make all PACKAGES=$(PACKAGES) MODE=$(MODE)
 
 docker-build-cached:
-	docker run --rm -v $(PWD):/workspace -w /workspace curvine/curvine-compile:build-cached make all
+	docker run --rm -v $(PWD):/workspace -w /workspace curvine/curvine-compile:build-cached make all PACKAGES=$(PACKAGES) MODE=$(MODE)
 
 # 6. Build compilation image under curvine-docker
 docker-build-img:
@@ -141,5 +149,20 @@ csi-docker-fast:
 	@echo "Building curvine-csi Docker image (fast)..."
 	docker build --build-arg GOPROXY=https://goproxy.cn,direct -t curvine-csi:latest -f curvine-csi/Dockerfile .
 
-# 8. All in one
-all: build
+# 构建参数组装函数 - 启用所有OpenDAL功能
+define build_args
+$(if $(filter debug,$(MODE)),-d) \
+$(if $(filter-out all,$(PACKAGES)),--package $(PACKAGES)) \
+--ufs opendal-s3 --ufs opendal-oss --ufs opendal-azblob --ufs opendal-gcs --ufs s3 \
+$(ARGS)
+endef
+
+# 8. All in one - 默认启用所有OpenDAL功能
+all: check-env
+	@echo "Building Curvine with all OpenDAL features enabled:"
+	@echo "  UFS Types: opendal-s3, opendal-oss, opendal-azblob, opendal-gcs, s3"
+	@echo "  Packages: $(PACKAGES)" 
+	@echo "  Mode: $(MODE)"
+	@echo "  Additional Args: $(ARGS)"
+	@echo ""
+	$(SHELL_CMD) build/build.sh $(strip $(call build_args))

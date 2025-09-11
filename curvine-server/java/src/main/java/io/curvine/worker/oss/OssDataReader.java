@@ -209,14 +209,15 @@ public class OssDataReader {
         // 基础配置
         conf.set("fs.defaultFS", "oss://");
         
-        // OSS配置
-        String endpoint = ossConfig.get("fs.oss.endpoint");
-        String accessKeyId = ossConfig.get("fs.oss.accessKeyId");
-        String accessKeySecret = ossConfig.get("fs.oss.accessKeySecret");
-        String bucket = ossConfig.get("fs.oss.bucket");
+        // OSS配置 - 与opendal.rs格式保持一致
+        String endpoint = ossConfig.get("oss.endpoint_url");
+        String accessKeyId = ossConfig.get("oss.credentials.access");
+        String accessKeySecret = ossConfig.get("oss.credentials.secret");
+        String bucket = ossConfig.get("oss.bucket");
         
         if (endpoint == null || accessKeyId == null || accessKeySecret == null) {
-            throw new IllegalArgumentException("Missing required OSS configuration");
+            throw new IllegalArgumentException(
+                "Missing required OSS configuration. Required keys: oss.endpoint_url, oss.credentials.access, oss.credentials.secret");
         }
         
         conf.set("fs.oss.endpoint", endpoint);
@@ -230,33 +231,53 @@ public class OssDataReader {
         // 判断是否为OSS-HDFS
         boolean isOssHdfs = endpoint.contains("oss-dls");
         if (isOssHdfs) {
-            LOG.info("Detected OSS-HDFS endpoint, attempting to configure JindoData");
+            LOG.info("Detected OSS-HDFS endpoint, JindoData is required");
             
-            // 尝试使用JindoData，如果不可用则降级到标准实现
+            // OSS-HDFS必须使用JindoData，不允许降级
+            if (!isJindoDataAvailable()) {
+                throw new RuntimeException(
+                    "OSS-HDFS requires JindoData, but JindoData is not available in classpath. " +
+                    "Please ensure jindodata dependencies are included.");
+            }
+            
+            LOG.info("Using JindoData implementation for OSS-HDFS");
+            // OSS-HDFS JindoData配置
+            conf.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
+            conf.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
+            
+            // JindoData特定配置
+            conf.set("fs.jindo.oss.endpoint", endpoint);
+            conf.set("fs.jindo.oss.access.key", accessKeyId);
+            conf.set("fs.jindo.oss.access.secret", accessKeySecret);
+            
+            // JindoData优化配置
+            conf.setBoolean("fs.oss.connection.ssl.enabled", endpoint.startsWith("https://"));
+            conf.setInt("fs.oss.connection.timeout", 300000); // 5分钟
+            conf.setInt("fs.oss.socket.timeout", 300000); // 5分钟
+            conf.setInt("fs.oss.connection.maximum", 1024);
+            
+        } else {
+            LOG.info("Detected standard OSS endpoint, using Hadoop OSS connector or JindoData if available");
+            
+            // 对于标准OSS，优先使用JindoData，如果不可用则降级
             if (isJindoDataAvailable()) {
-                LOG.info("JindoData is available, using JindoData implementation");
-                // OSS-HDFS JindoData配置
+                LOG.info("JindoData is available, using JindoData for standard OSS");
+                // 标准OSS使用JindoData配置
                 conf.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
                 conf.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
                 
-                // JindoData特定配置
                 conf.set("fs.jindo.oss.endpoint", endpoint);
                 conf.set("fs.jindo.oss.access.key", accessKeyId);
                 conf.set("fs.jindo.oss.access.secret", accessKeySecret);
                 
-                // JindoData优化配置
                 conf.setBoolean("fs.oss.connection.ssl.enabled", endpoint.startsWith("https://"));
-                conf.setInt("fs.oss.connection.timeout", 300000); // 5分钟
-                conf.setInt("fs.oss.socket.timeout", 300000); // 5分钟
+                conf.setInt("fs.oss.connection.timeout", 300000);
+                conf.setInt("fs.oss.socket.timeout", 300000);
                 conf.setInt("fs.oss.connection.maximum", 1024);
             } else {
-                LOG.warn("JindoData not available, falling back to standard OSS implementation for OSS-HDFS");
+                LOG.info("JindoData not available, using standard Hadoop OSS connector");
                 configureStandardOss(conf, endpoint, accessKeyId, accessKeySecret);
             }
-            
-        } else {
-            LOG.info("Detected standard OSS endpoint, using Hadoop OSS connector");
-            configureStandardOss(conf, endpoint, accessKeyId, accessKeySecret);
         }
         
         // 通用性能优化配置

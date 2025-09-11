@@ -16,7 +16,7 @@ use bytes::BytesMut;
 use curvine_common::conf::UfsConf;
 use curvine_common::error::FsError;
 use curvine_common::fs::{FileSystem, Path, Reader, Writer};
-use curvine_common::state::{FileStatus, SetAttrOpts};
+use curvine_common::state::{FileStatus, FileType, SetAttrOpts};
 use curvine_common::FsResult;
 use futures::StreamExt;
 use opendal::services::*;
@@ -299,7 +299,7 @@ impl OpendalFileSystem {
                     builder = builder.access_key_id(access_key);
                 }
                 if let Some(secret_key) = conf.get("oss.credentials.secret") {
-                    builder = builder.secret_access_key(secret_key);
+                    builder = builder.access_key_secret(secret_key);
                 }
 
                 Operator::new(builder)

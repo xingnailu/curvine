@@ -207,27 +207,27 @@ pub fn validate_oss_path(path: &str) -> Result<(), String> {
 }
 
 pub fn validate_oss_configs(configs: &HashMap<String, String>) -> Result<(), String> {
-    // 验证 fs.oss.endpoint 必须存在且不为空
-    let endpoint = configs.get("fs.oss.endpoint")
-        .ok_or_else(|| "fs.oss.endpoint is required for OSS schema".to_string())?;
+    // 验证 oss.endpoint_url 必须存在且不为空（与opendal.rs格式保持一致）
+    let endpoint = configs.get("oss.endpoint_url")
+        .ok_or_else(|| "oss.endpoint_url is required for OSS schema".to_string())?;
     
     if endpoint.is_empty() {
-        return Err("fs.oss.endpoint cannot be empty".to_string());
+        return Err("oss.endpoint_url cannot be empty".to_string());
     }
 
     if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-        return Err("fs.oss.endpoint must start with http:// or https://".to_string());
+        return Err("oss.endpoint_url must start with http:// or https://".to_string());
     }
 
-    // 验证认证信息
-    let has_access_key = configs.contains_key("fs.oss.accessKeyId");
-    let has_secret_key = configs.contains_key("fs.oss.accessKeySecret");
+    // 验证认证信息（与opendal.rs格式保持一致）
+    let has_access_key = configs.contains_key("oss.credentials.access");
+    let has_secret_key = configs.contains_key("oss.credentials.secret");
 
     if has_access_key != has_secret_key {
         let missing = if has_access_key {
-            "fs.oss.accessKeySecret"
+            "oss.credentials.secret"
         } else {
-            "fs.oss.accessKeyId"
+            "oss.credentials.access"
         };
 
         return Err(format!(
@@ -237,15 +237,15 @@ pub fn validate_oss_configs(configs: &HashMap<String, String>) -> Result<(), Str
     }
 
     if has_access_key && has_secret_key {
-        let access_key = configs.get("fs.oss.accessKeyId").unwrap();
-        let secret_key = configs.get("fs.oss.accessKeySecret").unwrap();
+        let access_key = configs.get("oss.credentials.access").unwrap();
+        let secret_key = configs.get("oss.credentials.secret").unwrap();
 
         if access_key.is_empty() {
-            return Err("fs.oss.accessKeyId cannot be empty".to_string());
+            return Err("oss.credentials.access cannot be empty".to_string());
         }
 
         if secret_key.is_empty() {
-            return Err("fs.oss.accessKeySecret cannot be empty".to_string());
+            return Err("oss.credentials.secret cannot be empty".to_string());
         }
     }
 

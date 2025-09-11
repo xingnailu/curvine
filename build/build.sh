@@ -457,7 +457,7 @@ if should_build_package "java"; then
   # Build curvine-hadoop java package
   echo "Building curvine-hadoop Java package..."
   cd "$FS_HOME"/curvine-libsdk/java
-  mvn protobuf:compile package -DskipTests -P${PROFILE#--}
+  mvn protobuf:compile install -DskipTests -P${PROFILE#--}
   if [ $? -ne 0 ]; then
     echo "curvine-hadoop Java build failed. Exiting..."
     exit 1

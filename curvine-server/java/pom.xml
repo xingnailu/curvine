@@ -79,6 +79,27 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- 
+        JindoData for OSS and OSS-HDFS support
+        注意：JindoData不在公共Maven仓库中，需要手动安装
+        下载地址：https://github.com/aliyun/alibabacloud-jindodata
+        
+        如需启用JindoData支持，请：
+        1. 下载JindoData SDK
+        2. 解压后将jar包添加到运行时classpath
+        3. 或使用maven install-file命令本地安装
+        
+        <dependency>
+            <groupId>com.aliyun.jindodata</groupId>
+            <artifactId>jindodata</artifactId>
+            <version>6.5.1</version>
+            <scope>provided</scope>
+            <optional>true</optional>
+        </dependency>
+        
+        运行时如果检测到JindoData可用，会自动启用OSS-HDFS支持
+        -->
         
         <!-- 阿里云OSS Java SDK -->
         <dependency>
