@@ -98,6 +98,8 @@ impl MountCommand {
         if let Some(scheme) = extract_scheme(&self.ufs_path) {
             if scheme == "s3" {
                 enrich_s3_configs(&self.ufs_path, &mut configs);
+            } else if scheme == "oss" {
+                enrich_oss_configs(&self.ufs_path, &mut configs);
             }
         }
 

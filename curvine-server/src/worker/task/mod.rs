@@ -18,6 +18,9 @@
 mod load_task_runner;
 pub use self::load_task_runner::LoadTaskRunner;
 
+mod oss_load_task_runner;
+pub use self::oss_load_task_runner::OssLoadTaskRunner;
+
 mod task_manager;
 pub use self::task_manager::TaskManager;
 

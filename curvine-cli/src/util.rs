@@ -62,6 +62,10 @@ pub fn validate_path_and_configs(
             validate_s3_path(path)?;
             validate_s3_configs(configs)
         }
+        Some("oss") => {
+            validate_oss_path(path)?;
+            validate_oss_configs(configs)
+        }
         Some("minio") => validate_minio_configs(path),
         Some(_) => Ok(()), // No special validation for other schemes
         None => Err(format!("Unrecognized path format: {}", path)),
@@ -125,8 +129,127 @@ pub fn enrich_s3_configs(path: &str, configs: &mut HashMap<String, String>) {
     }
 }
 
+pub fn enrich_oss_configs(path: &str, configs: &mut HashMap<String, String>) {
+    if !configs.contains_key("fs.oss.bucket") {
+        if let Some((bucket, _)) = extract_oss_bucket_and_key(path) {
+            configs.insert("fs.oss.bucket".to_string(), bucket.clone());
+            println!("OSS bucket name: {}", bucket);
+        }
+    }
+
+    // 根据 fs.oss.endpoint 判断类型
+    if let Some(endpoint) = configs.get("fs.oss.endpoint") {
+        let fs_type = determine_oss_type(endpoint);
+        configs.insert("fs.type".to_string(), fs_type.clone());
+        println!("OSS type determined as: {}", fs_type);
+    }
+
+    // 设置默认连接参数
+    if !configs.contains_key("conn_timeout") {
+        configs.insert("conn_timeout".to_string(), "3".to_string());
+    }
+
+    if !configs.contains_key("retry_times") {
+        configs.insert("retry_times".to_string(), "3".to_string());
+    }
+
+    if !configs.contains_key("read_timeout") {
+        configs.insert("read_timeout".to_string(), "5".to_string());
+    }
+}
+
+pub fn extract_oss_bucket_and_key(path: &str) -> Option<(String, String)> {
+    let path = path.strip_prefix("oss://")?;
+
+    let slash_pos = path.find('/');
+
+    match slash_pos {
+        Some(pos) => {
+            let bucket = path[..pos].to_string();
+            let key = path[pos + 1..].to_string();
+            Some((bucket, key))
+        }
+        None => Some((path.to_string(), String::new())),
+    }
+}
+
+pub fn determine_oss_type(endpoint: &str) -> String {
+    if endpoint.contains("oss-dls") {
+        "oss-hdfs".to_string()
+    } else {
+        "oss".to_string()
+    }
+}
+
 pub fn extract_scheme(path: &str) -> Option<String> {
     path.find("://").map(|pos| path[..pos].to_lowercase())
+}
+
+pub fn validate_oss_path(path: &str) -> Result<(), String> {
+    let (bucket, _) = extract_oss_bucket_and_key(path)
+        .ok_or_else(|| format!("Invalid OSS path format: {}", path))?;
+
+    if bucket.is_empty() {
+        return Err("OSS bucket name cannot be empty".to_string());
+    }
+
+    if !bucket
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(format!(
+            "OSS bucket name contains invalid characters: {}",
+            bucket
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn validate_oss_configs(configs: &HashMap<String, String>) -> Result<(), String> {
+    // 验证 fs.oss.endpoint 必须存在且不为空
+    let endpoint = configs.get("fs.oss.endpoint")
+        .ok_or_else(|| "fs.oss.endpoint is required for OSS schema".to_string())?;
+    
+    if endpoint.is_empty() {
+        return Err("fs.oss.endpoint cannot be empty".to_string());
+    }
+
+    if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
+        return Err("fs.oss.endpoint must start with http:// or https://".to_string());
+    }
+
+    // 验证认证信息
+    let has_access_key = configs.contains_key("fs.oss.accessKeyId");
+    let has_secret_key = configs.contains_key("fs.oss.accessKeySecret");
+
+    if has_access_key != has_secret_key {
+        let missing = if has_access_key {
+            "fs.oss.accessKeySecret"
+        } else {
+            "fs.oss.accessKeyId"
+        };
+
+        return Err(format!(
+            "OSS authentication information incomplete: access provided but missing {}",
+            missing
+        ));
+    }
+
+    if has_access_key && has_secret_key {
+        let access_key = configs.get("fs.oss.accessKeyId").unwrap();
+        let secret_key = configs.get("fs.oss.accessKeySecret").unwrap();
+
+        if access_key.is_empty() {
+            return Err("fs.oss.accessKeyId cannot be empty".to_string());
+        }
+
+        if secret_key.is_empty() {
+            return Err("fs.oss.accessKeySecret cannot be empty".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 pub fn validate_s3_configs(configs: &HashMap<String, String>) -> Result<(), String> {

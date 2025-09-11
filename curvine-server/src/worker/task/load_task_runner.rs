@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use crate::worker::task::TaskContext;
+use crate::worker::task::oss_load_task_runner::OssLoadTaskRunner;
+use crate::worker::java::JvmConfig;
 use curvine_client::file::{CurvineFileSystem, FsWriter};
 use curvine_client::rpc::JobMasterClient;
 use curvine_client::unified::{UfsFileSystem, UnifiedReader};
 use curvine_common::fs::{FileSystem, Path, Reader, Writer};
 use curvine_common::state::{CreateFileOptsBuilder, JobTaskState};
+use curvine_common::conf::WorkerConf;
 use curvine_common::FsResult;
 use log::{error, info, warn};
 use orpc::common::{LocalTime, TimeSpent};
@@ -30,6 +33,7 @@ pub struct LoadTaskRunner {
     master_client: JobMasterClient,
     progress_interval_ms: u64,
     task_timeout_ms: u64,
+    jvm_config: Option<JvmConfig>,
 }
 
 impl LoadTaskRunner {
@@ -38,14 +42,50 @@ impl LoadTaskRunner {
         fs: CurvineFileSystem,
         progress_interval_ms: u64,
         task_timeout_ms: u64,
+        worker_conf: &WorkerConf,
     ) -> Self {
         let master_client = JobMasterClient::new(fs.fs_client());
+        
+        // 从WorkerConf创建JvmConfig
+        let jvm_config = Self::create_jvm_config(worker_conf);
+        
         Self {
             task,
             fs,
             master_client,
             progress_interval_ms,
             task_timeout_ms,
+            jvm_config: Some(jvm_config),
+        }
+    }
+
+    /// 从WorkerConf创建JvmConfig
+    fn create_jvm_config(worker_conf: &WorkerConf) -> JvmConfig {
+        // OSS同步组件版本号，应与curvine-server/java/pom.xml中的version保持一致
+        const OSS_SYNC_VERSION: &str = "1.0.0";
+        
+        // 构建classpath，默认从当前项目的lib目录下读取
+        let jar_path = std::env::var("CURVINE_HOME")
+            .map(|home| format!("{}/lib/curvine-oss-sync-{}.jar", home, OSS_SYNC_VERSION))
+            .unwrap_or_else(|_| format!("./lib/curvine-oss-sync-{}.jar", OSS_SYNC_VERSION));
+        
+        JvmConfig {
+            java_home: worker_conf.java_home.clone(),
+            classpath: jar_path,
+            main_class: "io.curvine.worker.OssDataSyncRunner".to_string(),
+            heap_size: worker_conf.jvm_heap_size.clone(),
+            gc_options: vec![
+                "-XX:+UseG1GC".to_string(),
+                "-XX:MaxGCPauseMillis=200".to_string(),
+                "-XX:+UnlockExperimentalVMOptions".to_string(),
+            ],
+            jvm_args: vec![
+                "-server".to_string(),
+                "-Dfile.encoding=UTF-8".to_string(),
+            ],
+            max_retries: worker_conf.jvm_max_retries,
+            process_timeout_ms: worker_conf.jvm_process_timeout_ms,
+            health_check_interval_ms: 30 * 1000, // 30秒
         }
     }
 
@@ -70,6 +110,11 @@ impl LoadTaskRunner {
     }
 
     async fn run0(&self) -> FsResult<()> {
+        // 检查是否为OSS schema，如果是则委托给OSS专用运行器
+        if self.is_oss_task() {
+            return self.run_oss_task().await;
+        }
+
         self.task
             .update_state(JobTaskState::Loading, "Task started");
 
@@ -164,5 +209,69 @@ impl LoadTaskRunner {
         self.master_client
             .report_task(&task.info.job.job_id, &task.info.task_id, progress)
             .await
+    }
+
+    /// 检查是否为OSS任务
+    fn is_oss_task(&self) -> bool {
+        self.task.info.source_path.starts_with("oss://")
+    }
+
+    /// 执行OSS任务
+    async fn run_oss_task(&self) -> FsResult<()> {
+        let jvm_config = self.jvm_config.as_ref()
+            .ok_or_else(|| curvine_common::error::FsError::from("JVM config is required for OSS tasks".to_string()))?;
+
+        info!("Delegating OSS task {} to Java process", self.task.info.task_id);
+
+        // 创建OSS任务运行器
+        let oss_runner = OssLoadTaskRunner::new(
+            self.task.clone(),
+            jvm_config.clone(),
+            self.task_timeout_ms,
+        );
+
+        // 执行OSS任务
+        match oss_runner.run().await {
+            Ok(()) => {
+                info!("OSS task {} completed successfully via Java process", self.task.info.task_id);
+                
+                // 报告任务完成给Master
+                let progress = self.task.get_progress();
+                let res = self
+                    .master_client
+                    .report_task(
+                        self.task.info.job.job_id.clone(),
+                        self.task.info.task_id.clone(),
+                        progress,
+                    )
+                    .await;
+
+                if let Err(e) = res {
+                    warn!("Failed to report OSS task completion: {}", e);
+                }
+
+                Ok(())
+            }
+            Err(e) => {
+                error!("OSS task {} failed: {}", self.task.info.task_id, e);
+                
+                // 报告任务失败给Master
+                let progress = self.task.set_failed(e.to_string());
+                let res = self
+                    .master_client
+                    .report_task(
+                        self.task.info.job.job_id.clone(),
+                        self.task.info.task_id.clone(),
+                        progress,
+                    )
+                    .await;
+
+                if let Err(e) = res {
+                    warn!("Failed to report OSS task failure: {}", e);
+                }
+
+                Err(e)
+            }
+        }
     }
 }

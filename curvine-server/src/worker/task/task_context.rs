@@ -87,4 +87,15 @@ impl TaskContext {
             message: lock.message.clone(),
         }
     }
+
+    pub fn get_progress(&self) -> JobTaskProgress {
+        let lock = self.progress.lock().unwrap();
+        JobTaskProgress {
+            state: self.get_state(),
+            total_size: lock.total_size,
+            loaded_size: lock.loaded_size,
+            update_time: lock.update_time,
+            message: lock.message.clone(),
+        }
+    }
 }

@@ -156,6 +156,12 @@ pub struct WorkerConf {
 
     pub block_replication_concurrency_limit: usize,
     pub block_replication_chunk_size: usize,
+
+    // JVM进程相关配置（用于OSS数据同步）
+    pub java_home: String,
+    pub jvm_heap_size: String,
+    pub jvm_max_retries: u32,
+    pub jvm_process_timeout_ms: u64,
 }
 
 impl WorkerConf {
@@ -199,6 +205,12 @@ impl Default for WorkerConf {
             pipe_pool_idle_time: 0,
             block_replication_concurrency_limit: 100,
             block_replication_chunk_size: 1024 * 1024,
+
+            // JVM进程默认配置
+            java_home: std::env::var("JAVA_HOME").unwrap_or_else(|_| "/usr/lib/jvm/java-8-openjdk".to_string()),
+            jvm_heap_size: "2g".to_string(),
+            jvm_max_retries: 3,
+            jvm_process_timeout_ms: 60 * 60 * 1000, // 1小时
         }
     }
 }

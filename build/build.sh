@@ -364,14 +364,28 @@ if should_build_package "java"; then
     cp -f "$FS_HOME/target/${PROFILE#--}/libcurvine_libsdk.so" "$FS_HOME/curvine-libsdk/java/native/libcurvine_libsdk_${OS_VERSION}_$ARCH_NAME.so"
   fi
 
-  # Build java package
+  # Build curvine-hadoop java package
+  echo "Building curvine-hadoop Java package..."
   cd "$FS_HOME"/curvine-libsdk/java
   mvn protobuf:compile package -DskipTests -P${PROFILE#--}
   if [ $? -ne 0 ]; then
-    echo "Java build failed. Exiting..."
+    echo "curvine-hadoop Java build failed. Exiting..."
     exit 1
   fi
   cp "$FS_HOME"/curvine-libsdk/java/target/curvine-hadoop-*.jar "$DIST_DIR"/lib
+fi
+
+# Build OSS sync worker Java component (separate from main java package)
+if should_build_package "server" || should_build_package "all"; then
+  echo "Building OSS sync worker Java component..."
+  cd "$FS_HOME"/curvine-server/java
+  mvn clean compile package -DskipTests -q
+  if [ $? -ne 0 ]; then
+    echo "OSS sync worker Java build failed. Exiting..."
+    exit 1
+  fi
+  cp "$FS_HOME"/curvine-server/java/target/curvine-oss-sync-*.jar "$DIST_DIR"/lib/
+  echo "OSS sync worker JAR copied to $DIST_DIR/lib/"
 fi
 
 # create zip

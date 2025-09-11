@@ -1,0 +1,34 @@
+# Curvine OSS Worker配置示例
+# 该配置展示了如何配置Worker来处理OSS数据同步任务
+
+[worker]
+# Worker基本配置
+worker_id = "worker-001"
+bind_address = "0.0.0.0"
+port = 8080
+
+# Master连接配置
+master_address = "localhost:8070"
+heartbeat_interval_ms = 30000
+
+# 任务处理配置
+max_concurrent_tasks = 4
+task_timeout_ms = 300000
+
+# JVM配置 - 用于OSS数据同步
+java_home = "/usr/lib/jvm/java-8-openjdk-amd64"  # 根据实际环境调整
+jvm_heap_size = "2g"                              # JVM堆大小
+jvm_max_retries = 3                              # JVM进程最大重试次数
+jvm_process_timeout_ms = 600000                  # JVM进程超时时间（10分钟）
+
+# 存储配置
+[storage]
+data_dir = "/opt/curvine/data"
+cache_size = "1G"
+
+# 日志配置
+[logging]
+level = "INFO"
+file = "/var/log/curvine/worker.log"
+max_size = "100MB"
+max_files = 10

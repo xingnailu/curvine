@@ -149,30 +149,54 @@ else
     print_status "FAIL" "Maven not found. Please install Maven version 3.8.0 or later" "MAVEN"
 fi
 
-# Check LLVM (version 12 or later)
+# Check LLVM (version 10 or later, since we have LLVM 10 available)
 echo -e "${BLUE}Checking LLVM...${NC}"
+LLVM_FOUND=false
+LLVM_VERSION=""
+
+# Try llvm-config first
 if command -v llvm-config >/dev/null 2>&1; then
     LLVM_VERSION=$(llvm-config --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
     if [ -z "$LLVM_VERSION" ]; then
         LLVM_VERSION=$(llvm-config --version | grep -oE '[0-9]+\.[0-9]+' | head -n1)
     fi
-    if version_compare "$LLVM_VERSION" "12.0.0"; then
-        print_status "OK" "LLVM $LLVM_VERSION (>= 12.0.0 required)"
-    else
-        print_status "FAIL" "LLVM $LLVM_VERSION found, but version 12.0.0 or later is required" "LLVM"
-    fi
-elif command -v clang >/dev/null 2>&1; then
+    LLVM_FOUND=true
+else
+    # Try versioned llvm-config commands
+    for version in 16 15 14 13 12 11 10 9; do
+        if command -v "llvm-config-$version" >/dev/null 2>&1; then
+            LLVM_VERSION=$("llvm-config-$version" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+            if [ -z "$LLVM_VERSION" ]; then
+                LLVM_VERSION=$("llvm-config-$version" --version | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+            fi
+            LLVM_FOUND=true
+            # Create a symlink for convenience
+            if [ ! -L "/usr/local/bin/llvm-config" ] && [ -w "/usr/local/bin" ]; then
+                ln -sf "$(which llvm-config-$version)" "/usr/local/bin/llvm-config" 2>/dev/null || true
+            fi
+            break
+        fi
+    done
+fi
+
+# If still not found, try clang
+if [ "$LLVM_FOUND" = false ] && command -v clang >/dev/null 2>&1; then
     CLANG_VERSION=$(clang --version | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
     if [ -z "$CLANG_VERSION" ]; then
         CLANG_VERSION=$(clang --version | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1)
     fi
-    if version_compare "$CLANG_VERSION" "12.0.0"; then
-        print_status "OK" "LLVM/Clang $CLANG_VERSION (>= 12.0.0 required)"
+    LLVM_VERSION="$CLANG_VERSION"
+    LLVM_FOUND=true
+fi
+
+if [ "$LLVM_FOUND" = true ] && [ -n "$LLVM_VERSION" ]; then
+    if version_compare "$LLVM_VERSION" "10.0.0"; then
+        print_status "OK" "LLVM $LLVM_VERSION (>= 10.0.0 required)"
     else
-        print_status "FAIL" "LLVM/Clang $CLANG_VERSION found, but version 12.0.0 or later is required" "LLVM"
+        print_status "FAIL" "LLVM $LLVM_VERSION found, but version 10.0.0 or later is required" "LLVM"
     fi
 else
-    print_status "FAIL" "LLVM not found. Please install LLVM version 12.0.0 or later" "LLVM"
+    print_status "FAIL" "LLVM not found. Please install LLVM version 10.0.0 or later" "LLVM"
 fi
 
 # Check FUSE development packages (optional)

@@ -15,7 +15,7 @@
 use crate::worker::task::load_task_runner::LoadTaskRunner;
 use crate::worker::task::{TaskContext, TaskStore};
 use curvine_client::file::{CurvineFileSystem, FsContext};
-use curvine_common::conf::ClusterConf;
+use curvine_common::conf::{ClusterConf, WorkerConf};
 use curvine_common::state::LoadTaskInfo;
 use curvine_common::FsResult;
 use log::info;
@@ -30,6 +30,7 @@ pub struct TaskManager {
     sender: AsyncSender<Arc<TaskContext>>,
     progress_interval_ms: u64,
     task_timeout_ms: u64,
+    worker_conf: WorkerConf,
 }
 
 impl TaskManager {
@@ -73,6 +74,7 @@ impl TaskManager {
             sender,
             progress_interval_ms: conf.job.task_report_interval.as_millis() as u64,
             task_timeout_ms: conf.job.task_timeout.as_millis() as u64,
+            worker_conf: conf.worker.clone(),
         };
 
         Ok(mgr)
@@ -84,13 +86,14 @@ impl TaskManager {
         let fs = self.fs.clone();
         let progress_interval_ms = self.progress_interval_ms;
         let task_timeout_ms = self.task_timeout_ms;
+        let worker_conf = self.worker_conf.clone();
 
         self.rt.spawn(async move {
             while let Some(task) = receiver.recv().await {
                 let task_id = task.info.task_id.clone();
                 let store = task_store.clone();
                 let runner =
-                    LoadTaskRunner::new(task, fs.clone(), progress_interval_ms, task_timeout_ms);
+                    LoadTaskRunner::new(task, fs.clone(), progress_interval_ms, task_timeout_ms, &worker_conf);
 
                 rt.spawn(async move {
                     runner.run().await;
