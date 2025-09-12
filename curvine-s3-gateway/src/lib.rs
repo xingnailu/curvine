@@ -53,14 +53,11 @@ use auth::{
 use curvine_client::unified::UnifiedFileSystem;
 use curvine_common::conf::ClusterConf;
 
-
 fn register_s3_handlers(
     router: axum::Router,
     handlers: Arc<s3::handlers::S3Handlers>,
 ) -> axum::Router {
     router
-        // Expose concrete handlers for advanced streaming paths
-        .layer(axum::Extension(handlers.clone()))
         .layer(axum::Extension(
             handlers.clone() as Arc<dyn crate::s3::s3_api::PutObjectHandler + Send + Sync>
         ))
@@ -96,11 +93,11 @@ fn register_s3_handlers(
         .layer(axum::Extension(
             handlers.clone() as Arc<dyn crate::s3::s3_api::ListObjectHandler + Send + Sync>
         ))
-        // Object versions listing operations
         .layer(axum::Extension(handlers.clone()
             as Arc<
                 dyn crate::s3::s3_api::ListObjectVersionsHandler + Send + Sync,
             >))
+        .layer(axum::Extension(handlers))
 }
 
 async fn init_s3_authentication(
@@ -345,9 +342,7 @@ pub async fn start_gateway(
         region.clone(),
         conf.s3_gateway.put_temp_dir.clone(),
         rt.clone(),
-        conf.s3_gateway.get_mpsc_capacity,
         conf.s3_gateway.get_chunk_size_mb,
-        conf.s3_gateway.get_prefetch_depth,
     ));
 
     tracing::info!("S3 Gateway authentication configured successfully");

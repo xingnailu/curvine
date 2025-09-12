@@ -28,10 +28,9 @@ pub struct TempFileManager {
     pub use_memory_optimization: bool,
 }
 
-/// Temporary storage abstraction
 pub enum TempStorage {
     Memory(Vec<u8>),
-    File(File, String), // (file, path)
+    File(File, String),
 }
 
 impl TempFileManager {
@@ -138,10 +137,7 @@ impl TempStorage {
             TempStorage::File(file, _) => {
                 use tokio::io::AsyncSeekExt;
                 file.seek(std::io::SeekFrom::Start(0)).await?;
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "File-based reader not implemented",
-                ))
+                Err(std::io::Error::other("File-based reader not implemented"))
             }
         }
     }
