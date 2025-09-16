@@ -117,6 +117,25 @@ impl MountInfo {
         }
     }
 
+    /// 检查是否启用了OSS-HDFS
+    pub fn is_oss_hdfs_enabled(&self) -> bool {
+        self.properties
+            .get("oss-hdfs-enable")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    }
+
+    /// 检查挂载点是否为OSS协议
+    pub fn is_oss_protocol(&self) -> bool {
+        self.ufs_path.starts_with("oss://")
+    }
+
+    /// 检查是否需要使用dfs命令
+    /// OSS协议且启用了oss-hdfs时需要使用dfs命令
+    pub fn requires_dfs_command(&self) -> bool {
+        self.is_oss_protocol() && self.is_oss_hdfs_enabled()
+    }
+
     pub fn get_ufs_path(&self, path: &Path) -> CommonResult<Path> {
         if !path.is_cv() {
             return err_box!("path {} is not cv path", path);

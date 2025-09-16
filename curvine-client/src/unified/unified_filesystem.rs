@@ -100,6 +100,20 @@ impl UnifiedFileSystem {
         }
     }
 
+    /// 检查是否需要使用dfs命令操作OSS-HDFS挂载点
+    /// 如果是oss-hdfs挂载点，抛出错误提示用户使用bin/dfs命令
+    fn check_oss_hdfs_requirement(&self, mount_value: &MountValue) -> FsResult<()> {
+        if mount_value.info.requires_dfs_command() {
+            return err_box!(
+                "检测到OSS-HDFS挂载点 ({}), 当前环境不支持oss-hdfs操作。\n\
+                请使用 'bin/dfs' 命令代替 'bin/cv' 来操作此路径。\n\
+                oss-hdfs 功能需要 Jindo SDK 支持，只能在 Java 环境中使用。",
+                mount_value.info.ufs_path
+            );
+        }
+        Ok(())
+    }
+
     pub async fn get_master_info(&self) -> FsResult<MasterInfo> {
         self.cv.get_master_info().await
     }
@@ -214,28 +228,40 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
     async fn mkdir(&self, path: &Path, create_parent: bool) -> FsResult<bool> {
         match self.get_mount(path).await? {
             None => self.cv.mkdir(path, create_parent).await,
-            Some((ufs_path, mount)) => mount.ufs.mkdir(&ufs_path, create_parent).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.mkdir(&ufs_path, create_parent).await
+            },
         }
     }
 
     async fn create(&self, path: &Path, overwrite: bool) -> FsResult<UnifiedWriter> {
         match self.get_mount(path).await? {
             None => Ok(UnifiedWriter::Cv(self.cv.create(path, overwrite).await?)),
-            Some((ufs_path, mount)) => mount.ufs.create(&ufs_path, overwrite).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.create(&ufs_path, overwrite).await
+            },
         }
     }
 
     async fn append(&self, path: &Path) -> FsResult<UnifiedWriter> {
         match self.get_mount(path).await? {
             None => Ok(UnifiedWriter::Cv(self.cv.append(path).await?)),
-            Some((ufs_path, mount)) => mount.ufs.append(&ufs_path).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.append(&ufs_path).await
+            },
         }
     }
 
     async fn exists(&self, path: &Path) -> FsResult<bool> {
         match self.get_mount(path).await? {
             None => self.cv.exists(path).await,
-            Some((ufs_path, mount)) => mount.ufs.exists(&ufs_path).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.exists(&ufs_path).await
+            },
         }
     }
 
@@ -244,6 +270,8 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
             None => return Ok(UnifiedReader::Cv(self.cv.open(path).await?)),
             Some(v) => v,
         };
+
+        self.check_oss_hdfs_requirement(&mount)?;
 
         let read_cache = self.get_cache_validity(path, &ufs_path, &mount).await?;
 
@@ -289,6 +317,7 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
         match self.get_mount(src).await? {
             None => self.cv.rename(src, dst).await,
             Some((src_ufs, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
                 let dst_ufs = mount.get_ufs_path(dst)?;
                 let _ = mount.ufs.rename(&src_ufs, &dst_ufs).await?;
 
@@ -305,6 +334,7 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
         match self.get_mount(path).await? {
             None => self.cv.delete(path, recursive).await,
             Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
                 // delete cache
                 if self.cv.exists(path).await? {
                     self.cv.delete(path, recursive).await?;
@@ -323,6 +353,7 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
                 if mount.info.cv_path == path.path() {
                     return self.cv.get_status(path).await;
                 }
+                self.check_oss_hdfs_requirement(&mount)?;
                 mount.ufs.get_status(&ufs_path).await
             }
         }
@@ -335,6 +366,7 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
                 if mount.info.cv_path == path.path() {
                     return self.cv.get_status_bytes(path).await;
                 }
+                self.check_oss_hdfs_requirement(&mount)?;
                 mount.ufs.get_status_bytes(&ufs_path).await
             }
         }
@@ -343,14 +375,20 @@ impl FileSystem<UnifiedWriter, UnifiedReader> for UnifiedFileSystem {
     async fn list_status(&self, path: &Path) -> FsResult<Vec<FileStatus>> {
         match self.get_mount(path).await? {
             None => self.cv.list_status(path).await,
-            Some((ufs_path, mount)) => mount.ufs.list_status(&ufs_path).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.list_status(&ufs_path).await
+            },
         }
     }
 
     async fn list_status_bytes(&self, path: &Path) -> FsResult<BytesMut> {
         match self.get_mount(path).await? {
             None => self.cv.list_status_bytes(path).await,
-            Some((ufs_path, mount)) => mount.ufs.list_status_bytes(&ufs_path).await,
+            Some((ufs_path, mount)) => {
+                self.check_oss_hdfs_requirement(&mount)?;
+                mount.ufs.list_status_bytes(&ufs_path).await
+            },
         }
     }
 
