@@ -27,3 +27,9 @@ yarn.lock
 
 .metals/
 .scala-build/
+
+# 快速推送脚本 - 不要提交到仓库
+quick_push.sh
+p_push.py
+start_p_listener.sh
+QUICK_PUSH_README.md
