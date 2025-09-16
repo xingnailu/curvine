@@ -17,4 +17,6 @@
 #
 
 source "$(cd "`dirname "$0"`"; pwd)"/../conf/curvine-env.sh
+# Set environment variable to indicate this is a cv command
+export CURVINE_COMMAND_TYPE=cv
 ${CURVINE_HOME}/lib/curvine-cli "$@"

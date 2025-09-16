@@ -240,7 +240,7 @@ impl CurvineFileSystem {
 
         if !opts.update
             && opts.mount_type == MountType::Cst
-            && ufs_path.authority_path() != cv_path.path()
+            && !Self::paths_semantically_equal(ufs_path.authority_path(), cv_path.path())
         {
             return err_box!(
                 "for Cst mount type, the ufs path and the cv path must be identical. \
@@ -315,6 +315,19 @@ impl CurvineFileSystem {
         writer.write(str.as_ref().as_bytes()).await?;
         writer.complete().await?;
         Ok(())
+    }
+
+    /// 语义化比较两个路径是否相等，忽略末尾斜杠的差异
+    /// 例如: "/logs/" 和 "/logs" 被认为是相等的
+    fn paths_semantically_equal(path1: &str, path2: &str) -> bool {
+        let normalized_path1 = path1.trim_end_matches('/');
+        let normalized_path2 = path2.trim_end_matches('/');
+        
+        // 特殊处理根路径情况
+        let final_path1 = if normalized_path1.is_empty() { "/" } else { normalized_path1 };
+        let final_path2 = if normalized_path2.is_empty() { "/" } else { normalized_path2 };
+        
+        final_path1 == final_path2
     }
 
     // close fs, report metrics

@@ -108,6 +108,51 @@ impl LibFilesystem {
             .block_on(async { self.inner.get_ufs_path(&path).await })
     }
 
+    pub fn get_mount_table(&self) -> FsResult<BytesMut> {
+        use prost::Message;
+        use curvine_common::proto::GetMountTableResponse;
+        
+        let mounts = self.rt.block_on(async { self.inner.get_mount_table().await })?;
+        let mut response = GetMountTableResponse::default();
+        
+        for mount in mounts {
+            let mount_proto = curvine_common::utils::ProtoUtils::mount_info_to_pb(mount);
+            response.mount_table.push(mount_proto);
+        }
+        
+        let mut buf = BytesMut::new();
+        response.encode(&mut buf).map_err(|e| {
+            curvine_common::error::FsError::common(format!("Failed to encode mount table: {}", e))
+        })?;
+        
+        Ok(buf)
+    }
+
+    pub fn mount(&self, ufs_path: impl AsRef<str>, cv_path: impl AsRef<str>, properties: std::collections::HashMap<String, String>) -> FsResult<()> {
+        use curvine_common::fs::Path;
+        use curvine_common::state::{MountOptions, MountType};
+        
+        let ufs_path = Path::from_str(ufs_path)?;
+        let cv_path = Path::from_str(cv_path)?;
+        let opts = MountOptions::builder()
+            .set_properties(properties)
+            .mount_type(MountType::Cst)
+            .build();
+        
+        self.rt.block_on(async { 
+            self.inner.mount(&ufs_path, &cv_path, opts).await 
+        })
+    }
+
+    pub fn umount(&self, cv_path: impl AsRef<str>) -> FsResult<()> {
+        use curvine_common::fs::Path;
+        
+        let cv_path = Path::from_str(cv_path)?;
+        self.rt.block_on(async { 
+            self.inner.umount(&cv_path).await 
+        })
+    }
+
     pub fn cleanup(&self) {
         self.rt.block_on(self.inner.cleanup())
     }

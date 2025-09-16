@@ -22,12 +22,17 @@ source "$(cd "`dirname "$0"`"; pwd)"/../conf/curvine-env.sh
 export CLASSPATH=$(echo $CURVINE_HOME/lib/curvine-hadoop-*shade.jar | tr ' ' ':')
 
 # Choose whether to use a Java client or a Rust client according to the command
-if [ "$1" = "fs" ] || [ "$1" = "report" ]; then
+if [ "$1" = "fs" ] || [ "$1" = "report" ] || [ "$1" = "mount" ] || [ "$1" = "umount" ]; then
     # Use Java client to process file system commands
+    # Set system property to indicate this is a dfs command
     java -Xms256m -Xmx256m \
     -Dcurvine.conf.dir=${CURVINE_HOME}/conf \
+    -Dcurvine.command.type=dfs \
+    -DCURVINE_COMMAND_TYPE=dfs \
     io.curvine.CurvineShell "$@"
 else
     # Use the Rust client to process load-related commands
+    # Set environment variable to indicate this is a dfs command
+    export CURVINE_COMMAND_TYPE=dfs
     ${CURVINE_HOME}/lib/curvine-cli "$@"
 fi

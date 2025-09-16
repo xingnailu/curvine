@@ -1328,6 +1328,7 @@ dependencies = [
  "prost-build",
  "pyo3",
  "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
  "toml",

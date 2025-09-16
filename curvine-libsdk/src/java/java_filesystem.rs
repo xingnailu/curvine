@@ -111,6 +111,29 @@ impl JavaFilesystem {
         Ok(string)
     }
 
+    pub fn get_mount_table(&self, env: &mut JNIEnv) -> FsResult<jarray> {
+        let bytes = self.inner.get_mount_table()?;
+        let byte_arr = JavaUtils::new_jarray(env, &bytes)?;
+        Ok(byte_arr)
+    }
+
+    pub fn mount(&self, env: &mut JNIEnv, ufs_path: JString, cv_path: JString, properties_json: JString) -> FsResult<()> {
+        let ufs_path = JavaUtils::jstring_to_string(env, &ufs_path)?;
+        let cv_path = JavaUtils::jstring_to_string(env, &cv_path)?;
+        let properties_json = JavaUtils::jstring_to_string(env, &properties_json)?;
+        
+        // Parse JSON properties to HashMap
+        let properties: std::collections::HashMap<String, String> = serde_json::from_str(&properties_json)
+            .map_err(|e| curvine_common::error::FsError::common(format!("Failed to parse properties JSON: {}", e)))?;
+        
+        self.inner.mount(ufs_path, cv_path, properties)
+    }
+
+    pub fn umount(&self, env: &mut JNIEnv, cv_path: JString) -> FsResult<()> {
+        let cv_path = JavaUtils::jstring_to_string(env, &cv_path)?;
+        self.inner.umount(cv_path)
+    }
+
     pub fn cleanup(&self) {
         self.inner.cleanup()
     }

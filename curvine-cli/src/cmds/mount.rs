@@ -63,6 +63,10 @@ pub struct MountCommand {
 
     #[arg(short, long)]
     storage_type: Option<String>,
+
+    /// Enable OSS-HDFS protocol (default: false)
+    #[arg(long, default_value_t = false)]
+    oss_hdfs_enable: bool,
 }
 
 impl MountCommand {
@@ -99,7 +103,7 @@ impl MountCommand {
             if scheme == "s3" {
                 enrich_s3_configs(&self.ufs_path, &mut configs);
             } else if scheme == "oss" {
-                enrich_oss_configs(&self.ufs_path, &mut configs);
+                enrich_oss_configs(&self.ufs_path, &mut configs, self.oss_hdfs_enable);
             }
         }
 
@@ -119,6 +123,26 @@ impl MountCommand {
 
         let ufs_path = Path::from_str(&self.ufs_path)?;
         let cv_path = Path::from_str(&self.cv_path)?;
+
+        // 检查命令类型和协议兼容性
+        let is_dfs_command = std::env::var("CURVINE_COMMAND_TYPE")
+            .unwrap_or_default()
+            .to_lowercase() == "dfs";
+        
+        // 验证OSS-HDFS协议的使用权限
+        if self.oss_hdfs_enable {
+            if !is_dfs_command {
+                eprintln!("Error: unsupported oss-hdfs for mount, please use dfs command. Path: {}", self.ufs_path);
+                std::process::exit(1);
+            }
+            println!("使用dfs命令挂载oss-hdfs协议: {}", self.ufs_path);
+        } else if self.ufs_path.contains("oss://") {
+            if is_dfs_command {
+                println!("使用dfs命令挂载oss协议: {}", self.ufs_path);
+            } else {
+                println!("使用cv命令挂载oss协议: {}", self.ufs_path);
+            }
+        }
 
         // Creating a MountOptions Object
         let mnt_opts = self.to_mnt_opts()?;
@@ -155,7 +179,12 @@ impl MountCommand {
             ConsistencyStrategy::try_from(self.consistency_strategy.as_str())?;
         let ttl_ms = DurationUnit::from_str(self.ttl_ms.as_str())?.as_millis() as i64;
         let ttl_action = TtlAction::try_from(self.ttl_action.as_str())?;
-        let conf_map = self.get_config_map()?;
+        let mut conf_map = self.get_config_map()?;
+
+        // 将oss_hdfs_enable参数添加到properties中
+        if self.oss_hdfs_enable {
+            conf_map.insert("oss-hdfs-enable".to_string(), "true".to_string());
+        }
 
         let mut opts = MountOptions::builder()
             .update(self.update)

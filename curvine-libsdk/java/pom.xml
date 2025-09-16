@@ -37,7 +37,18 @@
         <dependency.scope>compile</dependency.scope>
         <hadoop.version>3.4.0</hadoop.version>
         <protobuf.version>3.25.7</protobuf.version>
+        <jindodata.version>6.5.1</jindodata.version>
     </properties>
+
+
+        <repositories>
+        <!-- Add JindoData Maven Repository -->
+        <repository>
+            <id>jindodata</id>
+            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+        </repository>
+    </repositories>
+
 
     <dependencies>
         <dependency>
@@ -166,6 +177,22 @@
             <artifactId>dnsjava</artifactId>
             <version>3.6.3</version>
         </dependency>
+                <!-- add jindo-core -->
+        <dependency>
+            <groupId>com.aliyun.jindodata</groupId>
+            <artifactId>jindo-core</artifactId>
+            <version>${jindodata.version}</version>
+        </dependency>
+              
+        <!-- add jindo-hadoop-sdk -->
+        <dependency>
+            <groupId>com.aliyun.jindodata</groupId>
+            <artifactId>jindo-sdk</artifactId>
+            <version>${jindodata.version}</version>
+        </dependency>
+        
+
+
     </dependencies>
 
     <profiles>
@@ -359,13 +386,12 @@
                         <include>master.proto</include>
                         <include>worker.proto</include>
                         <include>mount.proto</include>
-                        <include>load.proto</include>
                     </includes>
                     <skip>false</skip>
                 </configuration>
                 <executions>
                     <execution>
-                        <phase>compile</phase>
+                        <phase>generate-sources</phase>
                         <goals>
                             <goal>compile</goal>
                         </goals>

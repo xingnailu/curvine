@@ -129,7 +129,7 @@ pub fn enrich_s3_configs(path: &str, configs: &mut HashMap<String, String>) {
     }
 }
 
-pub fn enrich_oss_configs(path: &str, configs: &mut HashMap<String, String>) {
+pub fn enrich_oss_configs(path: &str, configs: &mut HashMap<String, String>, oss_hdfs_enable: bool) {
     if !configs.contains_key("fs.oss.bucket") {
         if let Some((bucket, _)) = extract_oss_bucket_and_key(path) {
             configs.insert("fs.oss.bucket".to_string(), bucket.clone());
@@ -137,11 +137,23 @@ pub fn enrich_oss_configs(path: &str, configs: &mut HashMap<String, String>) {
         }
     }
 
-    // 根据 fs.oss.endpoint 判断类型
-    if let Some(endpoint) = configs.get("fs.oss.endpoint") {
-        let fs_type = determine_oss_type(endpoint);
-        configs.insert("fs.type".to_string(), fs_type.clone());
-        println!("OSS type determined as: {}", fs_type);
+    // 根据oss_hdfs_enable参数或fs.oss.endpoint判断类型
+    let fs_type = if oss_hdfs_enable {
+        "oss-hdfs".to_string()
+    } else if let Some(endpoint) = configs.get("fs.oss.endpoint") {
+        determine_oss_type(endpoint)
+    } else {
+        "oss".to_string()
+    };
+    
+    configs.insert("fs.type".to_string(), fs_type.clone());
+    println!("OSS type determined as: {}", fs_type);
+
+    // OSS和OSS-HDFS都使用相同的URL格式(oss://)，区别在于fs.type参数
+    if oss_hdfs_enable || fs_type == "oss-hdfs" {
+        println!("OSS-HDFS协议已启用，使用JindoOssFileSystem实现");
+    } else {
+        println!("使用标准OSS协议");
     }
 
     // 设置默认连接参数

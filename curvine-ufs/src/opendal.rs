@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use bytes::BytesMut;
-use curvine_common::conf::UfsConf;
 use curvine_common::error::FsError;
 use curvine_common::fs::{FileSystem, Path, Reader, Writer};
 use curvine_common::state::{FileStatus, FileType, SetAttrOpts};
@@ -71,13 +70,13 @@ impl Reader for OpendalReader {
                 .reader_with(&self.object_path)
                 .chunk(self.chunk_size)
                 .await
-                .map_err(|e| FsError::common(format!("Failed to create reader: {}", e)))?;
+                .map_err(|e| FsError::common(format!("Failed to create reader: {e}")))?;
 
             self.byte_stream = Some(
                 reader
                     .into_bytes_stream(..self.length as u64)
                     .await
-                    .map_err(|e| FsError::common(format!("Failed to create stream: {}", e)))?,
+                    .map_err(|e| FsError::common(format!("Failed to create stream: {e}")))?,
             );
         }
 
@@ -85,7 +84,7 @@ impl Reader for OpendalReader {
             if let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(chunk) => Ok(DataSlice::Bytes(chunk)),
-                    Err(e) => Err(FsError::common(format!("Failed to read chunk: {}", e))),
+                    Err(e) => Err(FsError::common(format!("Failed to read chunk: {e}"))),
                 }
             } else {
                 Ok(DataSlice::Empty)
@@ -111,13 +110,13 @@ impl Reader for OpendalReader {
                 .reader_with(&self.object_path)
                 .chunk(self.chunk_size)
                 .await
-                .map_err(|e| FsError::common(format!("Failed to create reader: {}", e)))?;
+                .map_err(|e| FsError::common(format!("Failed to create reader: {e}")))?;
 
             self.byte_stream = Some(
                 reader
                     .into_bytes_stream(pos as u64..self.length as u64)
                     .await
-                    .map_err(|e| FsError::common(format!("Failed to create stream: {}", e)))?,
+                    .map_err(|e| FsError::common(format!("Failed to create stream: {e}")))?,
             );
         } else {
             // Skip forward in the current stream
@@ -189,7 +188,7 @@ impl Writer for OpendalWriter {
                 self.operator
                     .writer(&self.object_path)
                     .await
-                    .map_err(|e| FsError::common(format!("Failed to create writer: {}", e)))?,
+                    .map_err(|e| FsError::common(format!("Failed to create writer: {e}")))?,
             );
         }
 
@@ -211,7 +210,7 @@ impl Writer for OpendalWriter {
         writer
             .write(data)
             .await
-            .map_err(|e| FsError::common(format!("Failed to write: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to write: {e}")))?;
 
         Ok(len)
     }
@@ -228,7 +227,7 @@ impl Writer for OpendalWriter {
             writer
                 .close()
                 .await
-                .map_err(|e| FsError::common(format!("Failed to close writer: {}", e)))?;
+                .map_err(|e| FsError::common(format!("Failed to close writer: {e}")))?;
         }
 
         self.writer = None;
@@ -282,7 +281,7 @@ impl OpendalFileSystem {
                 }
 
                 Operator::new(builder)
-                    .map_err(|e| FsError::common(format!("Failed to create S3 operator: {}", e)))?
+                    .map_err(|e| FsError::common(format!("Failed to create S3 operator: {e}")))?
                     .layer(LoggingLayer::default())
                     .finish()
             }
@@ -303,7 +302,7 @@ impl OpendalFileSystem {
                 }
 
                 Operator::new(builder)
-                    .map_err(|e| FsError::common(format!("Failed to create OSS operator: {}", e)))?
+                    .map_err(|e| FsError::common(format!("Failed to create OSS operator: {e}")))?
                     .layer(LoggingLayer::default())
                     .finish()
             }
@@ -321,7 +320,7 @@ impl OpendalFileSystem {
                 }
 
                 Operator::new(builder)
-                    .map_err(|e| FsError::common(format!("Failed to create GCS operator: {}", e)))?
+                    .map_err(|e| FsError::common(format!("Failed to create GCS operator: {e}")))?
                     .layer(LoggingLayer::default())
                     .finish()
             }
@@ -343,7 +342,7 @@ impl OpendalFileSystem {
 
                 Operator::new(builder)
                     .map_err(|e| {
-                        FsError::common(format!("Failed to create Azure operator: {}", e))
+                        FsError::common(format!("Failed to create Azure operator: {e}"))
                     })?
                     .layer(LoggingLayer::default())
                     .finish()
@@ -382,7 +381,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
         self.operator
             .create_dir(&object_path)
             .await
-            .map_err(|e| FsError::common(format!("Failed to create directory: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to create directory: {e}")))?;
 
         Ok(true)
     }
@@ -430,7 +429,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
         match self.operator.stat(&object_path).await {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == opendal::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(FsError::common(format!("Failed to check existence: {}", e))),
+            Err(e) => Err(FsError::common(format!("Failed to check existence: {e}"))),
         }
     }
 
@@ -441,7 +440,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
             .operator
             .stat(&object_path)
             .await
-            .map_err(|e| FsError::common(format!("Failed to stat file: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to stat file: {e}")))?;
 
         Ok(OpendalReader {
             operator: self.operator.clone(),
@@ -462,7 +461,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
         self.operator
             .rename(&src_path, &dst_path)
             .await
-            .map_err(|e| FsError::common(format!("Failed to rename: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to rename: {e}")))?;
 
         Ok(true)
     }
@@ -479,7 +478,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
         } else {
             self.operator.delete(&object_path).await
         }
-        .map_err(|e| FsError::common(format!("Failed to delete: {}", e)))?;
+        .map_err(|e| FsError::common(format!("Failed to delete: {e}")))?;
 
         Ok(())
     }
@@ -491,7 +490,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
             .operator
             .stat(&object_path)
             .await
-            .map_err(|e| FsError::common(format!("Failed to stat: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to stat: {e}")))?;
 
         Ok(FileStatus {
             path: path.full_path().to_owned(),
@@ -521,7 +520,7 @@ impl FileSystem<OpendalWriter, OpendalReader> for OpendalFileSystem {
             .operator
             .list(&object_path)
             .await
-            .map_err(|e| FsError::common(format!("Failed to list directory: {}", e)))?;
+            .map_err(|e| FsError::common(format!("Failed to list directory: {e}")))?;
 
         let mut statuses = Vec::new();
         for entry in list_result {

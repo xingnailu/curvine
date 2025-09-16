@@ -143,4 +143,18 @@ public class CurvineFsMount {
         String ufsPath = CurvineNative.getUfsPath(nativeHandle, path);
         return Optional.ofNullable(ufsPath);
     }
+
+    public byte[] getMountTable() throws IOException {
+        byte[] bytes = CurvineNative.getMountTable(nativeHandle);
+        checkError(bytes);
+        return bytes;
+    }
+
+    public void mount(String ufsPath, String cvPath, String propertiesJson) throws IOException {
+        checkError(CurvineNative.mount(nativeHandle, ufsPath, cvPath, propertiesJson));
+    }
+
+    public void umount(String cvPath) throws IOException {
+        checkError(CurvineNative.umount(nativeHandle, cvPath));
+    }
 }

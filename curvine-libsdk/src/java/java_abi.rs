@@ -272,3 +272,39 @@ pub unsafe extern "C" fn Java_io_curvine_CurvineNative_getUfsPath(
     let fs = &*fs_ptr;
     java_err2!(env, fs.get_ufs_path(&mut env, path))
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_io_curvine_CurvineNative_getMountTable(
+    mut env: JNIEnv,
+    _this: JObject,
+    fs_ptr: *mut JavaFilesystem,
+) -> jarray {
+    let fs = &*fs_ptr;
+    java_err2!(env, fs.get_mount_table(&mut env))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_io_curvine_CurvineNative_mount(
+    mut env: JNIEnv,
+    _this: JObject,
+    fs_ptr: *mut JavaFilesystem,
+    ufs_path: JString,
+    cv_path: JString,
+    properties_json: JString,
+) -> jlong {
+    let fs = &*fs_ptr;
+    let _ = java_err!(env, fs.mount(&mut env, ufs_path, cv_path, properties_json));
+    SUCCESS
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_io_curvine_CurvineNative_umount(
+    mut env: JNIEnv,
+    _this: JObject,
+    fs_ptr: *mut JavaFilesystem,
+    cv_path: JString,
+) -> jlong {
+    let fs = &*fs_ptr;
+    let _ = java_err!(env, fs.umount(&mut env, cv_path));
+    SUCCESS
+}

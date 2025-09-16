@@ -270,4 +270,10 @@ public class CurvineNative {
     public static native byte[] getMountInfo(long nativeHandle, String path) throws IOException;
 
     public static native String getUfsPath(long nativeHandle, String path) throws IOException;
+
+    public static native byte[] getMountTable(long nativeHandle) throws IOException;
+
+    public static native long mount(long nativeHandle, String ufsPath, String cvPath, String propertiesJson) throws IOException;
+
+    public static native long umount(long nativeHandle, String cvPath) throws IOException;
 }
