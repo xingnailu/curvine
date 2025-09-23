@@ -390,13 +390,38 @@ impl FsDir {
         file: &mut InodeFile,
         commit: Option<&CommitBlock>,
     ) -> FsResult<()> {
+        log::info!(
+            "🔒 [FsDir::commit_block] Starting commit for file={}, file_id={}, has_commit_block={}",
+            name,
+            file.id,
+            commit.is_some()
+        );
+        
         let commit = match commit {
-            None => return Ok(()),
+            None => {
+                log::info!(
+                    "⏭️ [FsDir::commit_block] No commit block provided, skipping commit for file={}",
+                    name
+                );
+                return Ok(());
+            },
             Some(v) => v,
         };
 
+        log::info!(
+            "📋 [FsDir::commit_block] CommitBlock details: file={}, block_id={}, block_len={}",
+            name,
+            commit.block_id,
+            commit.block_len
+        );
+
         let last_block = match file.blocks.last_mut() {
             None => {
+                log::error!(
+                    "❌ [FsDir::commit_block] No blocks found in file={}, file_id={}",
+                    name,
+                    file.id
+                );
                 return err_box!(
                     "Inode file {}({}) block status is abnormal, no blocks",
                     file.id,
@@ -405,12 +430,33 @@ impl FsDir {
             }
             Some(v) => v,
         };
+        
+        log::info!(
+            "🔍 [FsDir::commit_block] Last block details: file={}, block_id={}, len={}, committed={}, writing={}",
+            name,
+            last_block.id,
+            last_block.len,
+            last_block.is_committed(),
+            last_block.is_writing()
+        );
+        
         if last_block.id != commit.block_id {
+            log::error!(
+                "❌ [FsDir::commit_block] Block ID mismatch: file={}, expected={}, actual={}",
+                name,
+                last_block.id,
+                commit.block_id
+            );
             return err_box!("Inode file {}({}) block status is abnormal, expected last block id {}, actual submitted block id {}",
                  file.id, name, last_block.id, commit.block_id);
         }
 
         if !last_block.is_writing() {
+            log::error!(
+                "❌ [FsDir::commit_block] Block not in writing status: file={}, block_id={}",
+                name,
+                commit.block_id
+            );
             return err_box!(
                 "Inode file {}({}), block {} not writing status",
                 file.id,
@@ -418,7 +464,24 @@ impl FsDir {
                 commit.block_id
             );
         }
+        
+        log::info!(
+            "🔒 [FsDir::commit_block] Committing block: file={}, block_id={}, old_len={}, new_len={}",
+            name,
+            last_block.id,
+            last_block.len,
+            commit.block_len
+        );
+        
         last_block.commit(commit);
+        
+        log::info!(
+            "✅ [FsDir::commit_block] Block committed successfully: file={}, block_id={}, final_len={}, committed={}",
+            name,
+            last_block.id,
+            last_block.len,
+            last_block.is_committed()
+        );
 
         Ok(())
     }
@@ -470,10 +533,25 @@ impl FsDir {
         let new_block_id = file.next_block_id()?;
 
         // commit block
+        log::info!(
+            "🔄 [FsDir::acquire_new_block] About to commit previous block for file={}, new_block_id={}",
+            name,
+            new_block_id
+        );
         Self::commit_block(name, file, commit_block.as_ref())?;
 
         // create block.
+        log::info!(
+            "➕ [FsDir::acquire_new_block] Adding new block to file={}, block_id={}, current_blocks_count={}",
+            name,
+            new_block_id,
+            file.blocks.len()
+        );
         file.add_block(BlockMeta::with_pre(new_block_id, choose_workers));
+        log::info!(
+            "✅ [FsDir::acquire_new_block] Block added successfully, new_blocks_count={}",
+            file.blocks.len()
+        );
 
         let block = ExtendedBlock {
             id: new_block_id,

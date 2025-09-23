@@ -157,14 +157,42 @@ impl Dataset for VfsDataset {
 
     fn create_block(&mut self, block: &ExtendedBlock) -> CommonResult<BlockMeta> {
         if let Some(v) = self.block_map.get(&block.id) {
-            return err_box!(
-                "Block {} already exists in state {:?} and thus cannot be created in worker_id: {}",
-                block.id,
-                v.state(),
-                self.worker_id
-            );
+            match v.state() {
+                // Allow reusing blocks already in Writing state
+                &crate::worker::block::BlockState::Writing => {
+                    log::info!(
+                        "♻️ [VfsDataset::create_block] Reusing existing writing block {}",
+                        block.id
+                    );
+                    return Ok(v.clone());
+                }
+                
+                // 🔧 支持重新打开finalized状态的块（copy-on-write）
+                &crate::worker::block::BlockState::Finalized => {
+                    log::info!(
+                        "🔄 [VfsDataset::create_block] Reopening finalized block {} with copy-on-write",
+                        block.id
+                    );
+                    return self.reopen_block(block);
+                }
+                
+                // Recovering状态不允许操作
+                &crate::worker::block::BlockState::Recovering => {
+                    return err_box!(
+                        "Block {} is in recovering state and cannot be created in worker_id: {}",
+                        block.id,
+                        self.worker_id
+                    );
+                }
+            }
         }
 
+        // 创建全新的块
+        log::info!(
+            "🆕 [VfsDataset::create_block] Creating new block {}",
+            block.id
+        );
+        
         let dir = self.dir_list.choose_dir(block)?;
         let meta = dir.create_block(block)?;
 
@@ -202,6 +230,50 @@ impl Dataset for VfsDataset {
         Ok(new_meta)
     }
 
+    // 🔧 重新打开已finalized的块，采用copy-on-write机制
+    fn reopen_block(&mut self, block: &ExtendedBlock) -> CommonResult<BlockMeta> {
+        // 先获取finalized块的信息，避免借用冲突
+        let (finalized_len, finalized_state, finalized_meta_clone) = {
+            let finalized_meta = self.get_block_check(block.id)?;
+            (finalized_meta.len(), *finalized_meta.state(), finalized_meta.clone())
+        };
+        
+        // 只能重新打开finalized状态的块
+        if finalized_state != BlockState::Finalized {
+            return err_box!(
+                "Block {} is not in finalized state, current state: {:?}",
+                block.id,
+                finalized_state
+            );
+        }
+        
+        log::info!(
+            "🔄 [VfsDataset::reopen_block] Reopening finalized block {} for random write, original_len={}, new_len={}",
+            block.id,
+            finalized_len,
+            block.len
+        );
+        
+        // 选择一个目录来存放copy-on-write的块
+        let cow_dir = self.dir_list.choose_dir(block)?;
+        
+        // 执行copy-on-write操作
+        let cow_meta = cow_dir.reopen_finalized_block(&finalized_meta_clone, block)?;
+        
+        // 更新块映射，用writing状态的块替换finalized状态的块
+        self.block_map.insert(cow_meta.id(), cow_meta.clone());
+        
+        // 更新空间统计
+        cow_dir.reserve_space(false, block.len);
+        
+        log::info!(
+            "✅ [VfsDataset::reopen_block] Block {} successfully reopened with copy-on-write",
+            block.id
+        );
+        
+        Ok(cow_meta)
+    }
+
     fn finalize_block(&mut self, block: &ExtendedBlock) -> CommonResult<BlockMeta> {
         let meta = self.get_block_check(block.id)?;
         if meta.state() != &BlockState::Writing {
@@ -216,9 +288,48 @@ impl Dataset for VfsDataset {
         let dir = self.find_dir(meta.dir_id())?;
         let final_meta = dir.finalize_block(meta)?;
 
+        // 🔧 检查是否存在原始的finalized文件（copy-on-write场景）
+        let original_finalized_path = {
+            let original_meta = BlockMeta {
+                id: final_meta.id(),
+                len: final_meta.len(),
+                state: BlockState::Finalized,
+                dir: final_meta.dir.clone(),
+            };
+            original_meta.get_block_path().ok()
+        };
+
+        // 如果存在原始finalized文件，需要替换它
+        if let Some(original_path) = original_finalized_path {
+            let new_finalized_path = final_meta.get_block_path()?;
+            
+            if original_path != new_finalized_path && original_path.exists() {
+                log::info!(
+                    "🔄 [VfsDataset::finalize_block] Replacing original finalized block {} at {:?} with copy-on-write version at {:?}",
+                    block.id,
+                    original_path,
+                    new_finalized_path
+                );
+                
+                // 删除原始finalized文件
+                try_err!(fs::remove_file(&original_path));
+                
+                log::info!(
+                    "✅ [VfsDataset::finalize_block] Original finalized block {} replaced successfully",
+                    block.id
+                );
+            }
+        }
+
         dir.release_space(false, meta.len);
         dir.reserve_space(true, final_meta.len);
         self.block_map.insert(final_meta.id(), final_meta.clone());
+
+        log::info!(
+            "🔒 [VfsDataset::finalize_block] Block {} finalized successfully, final_len={}",
+            block.id,
+            final_meta.len()
+        );
 
         Ok(final_meta)
     }

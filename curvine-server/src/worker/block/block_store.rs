@@ -56,6 +56,11 @@ impl BlockStore {
         self.write().append_block(expected_len, block)
     }
 
+    // 🔧 重新打开已finalized的块，采用copy-on-write机制
+    pub fn reopen_block(&self, block: &ExtendedBlock) -> CommonResult<BlockMeta> {
+        self.write().reopen_block(block)
+    }
+
     pub fn finalize_block(&self, block: &ExtendedBlock) -> CommonResult<BlockMeta> {
         self.write().finalize_block(block)
     }

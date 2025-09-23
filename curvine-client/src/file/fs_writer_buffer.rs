@@ -28,6 +28,7 @@ use std::sync::Arc;
 enum WriterTask {
     Flush(CallSender<i8>),
     Complete((bool, CallSender<i8>)),
+    Seek((i64, CallSender<i8>)),
 }
 
 enum SelectTask {
@@ -162,6 +163,69 @@ impl FsWriterBuffer {
             Ok(_) => Ok(()),
         }
     }
+    
+    pub async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        log::info!(
+            "🎯 [FsWriterBuffer::seek] path={}, seek_to={}, current_pos={}",
+            self.path.path(),
+            pos,
+            self.pos
+        );
+        
+        let res: FsResult<()> = {
+            let (tx, rx) = CallChannel::channel();
+            
+            match self.task_sender.send(WriterTask::Seek((pos, tx))).await {
+                Err(e) => {
+                    log::error!(
+                        "❌ [FsWriterBuffer::seek] Failed to send seek task: path={}, error={}",
+                        self.path.path(),
+                        e
+                    );
+                    return Err(e.into());
+                },
+                Ok(_) => {
+                    log::info!(
+                        "📤 [FsWriterBuffer::seek] Seek task sent, waiting for response: path={}",
+                        self.path.path()
+                    );
+                }
+            }
+            
+            match rx.receive().await {
+                Err(e) => {
+                    log::error!(
+                        "❌ [FsWriterBuffer::seek] Failed to receive seek response: path={}, error={}",
+                        self.path.path(),
+                        e
+                    );
+                    return Err(e.into());
+                },
+                Ok(_) => {
+                    log::info!(
+                        "📥 [FsWriterBuffer::seek] Seek response received: path={}",
+                        self.path.path()
+                    );
+                }
+            }
+            Ok(())
+        };
+
+        // 更新位置（注意：实际seek由后台任务执行）
+        if res.is_ok() {
+            self.pos = pos;
+            log::info!(
+                "✅ [FsWriterBuffer::seek] Seek completed successfully: path={}, new_pos={}",
+                self.path.path(),
+                self.pos
+            );
+        }
+
+        match res {
+            Err(e) => Err(self.check_error(e)),
+            Ok(_) => Ok(()),
+        }
+    }
 
     async fn write_future(
         mut chunk_receiver: AsyncReceiver<DataSlice>,
@@ -199,6 +263,88 @@ impl FsWriterBuffer {
                         writer.complete().await?;
                         tx.send(1)?;
                         return Ok(());
+                    }
+                    
+                    WriterTask::Seek((pos, tx)) => {
+                        log::info!(
+                            "🎯 [FsWriterBuffer::write_future] Processing seek task: path={}, pos={}",
+                            writer.path().path(),
+                            pos
+                        );
+                        
+                        // 先处理缓冲区中的所有数据
+                        let mut buffered_chunks = 0;
+                        while let Some(chunk) = chunk_receiver.try_recv()? {
+                            buffered_chunks += 1;
+                            log::info!(
+                                "📦 [FsWriterBuffer::write_future] Processing buffered chunk #{}: path={}, len={}",
+                                buffered_chunks,
+                                writer.path().path(),
+                                chunk.len()
+                            );
+                            
+                            match writer.write(chunk).await {
+                                Err(e) => {
+                                    log::error!(
+                                        "❌ [FsWriterBuffer::write_future] Failed to write buffered chunk: path={}, error={}",
+                                        writer.path().path(),
+                                        e
+                                    );
+                                    return Err(e);
+                                },
+                                Ok(_) => {
+                                    log::info!(
+                                        "✅ [FsWriterBuffer::write_future] Buffered chunk written successfully: path={}",
+                                        writer.path().path()
+                                    );
+                                }
+                            }
+                        }
+                        
+                        if buffered_chunks > 0 {
+                            log::info!(
+                                "📦 [FsWriterBuffer::write_future] Processed {} buffered chunks before seek: path={}",
+                                buffered_chunks,
+                                writer.path().path()
+                            );
+                        }
+                        
+                        // 执行seek操作
+                        match writer.seek(pos).await {
+                            Err(e) => {
+                                log::error!(
+                                    "❌ [FsWriterBuffer::write_future] Seek failed: path={}, pos={}, error={}",
+                                    writer.path().path(),
+                                    pos,
+                                    e
+                                );
+                                return Err(e);
+                            },
+                            Ok(_) => {
+                                log::info!(
+                                    "✅ [FsWriterBuffer::write_future] Seek succeeded: path={}, pos={}",
+                                    writer.path().path(),
+                                    pos
+                                );
+                            }
+                        }
+                        
+                        match tx.send(1) {
+                            Err(e) => {
+                                log::error!(
+                                    "❌ [FsWriterBuffer::write_future] Failed to send seek response: path={}, error={}",
+                                    writer.path().path(),
+                                    e
+                                );
+                                return Err(e.into());
+                            },
+                            Ok(_) => {
+                                log::info!(
+                                    "📤 [FsWriterBuffer::write_future] Seek response sent: path={}",
+                                    writer.path().path()
+                                );
+                            }
+                        }
                     }
                 },
 

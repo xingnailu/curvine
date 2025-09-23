@@ -22,7 +22,7 @@ use curvine_common::state::FileStatus;
 use log::info;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum IoPhase {
+pub enum IoPhase {
     Unset,
     Reading,
     Writing,
@@ -41,22 +41,48 @@ pub struct FuseFile {
 }
 
 impl FuseFile {
+    pub fn path_str(&self) -> &str {
+        self.path.path()
+    }
+    
+    pub fn flags(&self) -> u32 {
+        self.flags
+    }
+    
+    pub fn phase(&self) -> IoPhase {
+        self.phase
+    }
+    
     pub async fn create(fs: UnifiedFileSystem, path: Path, flags: u32) -> FuseResult<Self> {
+        info!(
+            "🔧 [FuseFile::create] Creating FuseFile - path: {}, flags: {:#x}",
+            path, flags
+        );
+        
         let action = OpenAction::try_from(flags)?;
+        
+        info!(
+            "📋 [FuseFile::create] Action analysis - read: {}, write: {}, action: {:?}",
+            action.read(), action.write(), action
+        );
         let (writer, reader) = match action {
             OpenAction::ReadOnly => {
+                info!("📖 [FuseFile::create] Creating reader for ReadOnly access");
                 let reader = Self::create_reader(&fs, &path).await?;
                 (None, Some(reader))
             }
 
             OpenAction::WriteOnly => {
+                info!("✏️ [FuseFile::create] Creating writer for WriteOnly access");
                 let writer = Self::create_writer(&fs, &path, flags).await?;
                 (Some(writer), None)
             }
 
             OpenAction::ReadWrite => {
+                
                 // It is explicitly to create a file.
                 let writer = if FuseUtils::has_truncate(flags) || FuseUtils::has_create(flags) {
+                    info!("✏️ [FuseFile::create] Creating writer for ReadWrite with create/truncate");
                     let writer = Self::create_writer(&fs, &path, flags).await?;
                     Some(writer)
                 } else {
@@ -114,8 +140,29 @@ impl FuseFile {
         flags: u32,
     ) -> FuseResult<FuseWriter> {
         let overwrite = FuseUtils::has_truncate(flags);
-        let writer = fs.create(path, overwrite).await?;
-        Ok(FuseWriter::new(&fs.conf().fuse, fs.clone_runtime(), writer))
+        let _want_create = FuseUtils::has_create(flags);
+        let exists = fs.exists(path).await.unwrap_or(false);
+
+        let unified_writer = if exists {
+            // 文件已存在：
+            if overwrite {
+                // O_TRUNC 语义：允许覆盖/截断
+                fs.create(path, true).await?
+            } else {
+                // 无 O_TRUNC：遵循 open(O_CREAT, …) 语义 → 打开已有文件，不再创建
+                // 使用 append 获取 writer，再由上层 write 中的 seek 实现从任意偏移写入
+                fs.append(path).await?
+            }
+        } else {
+            // 文件不存在：
+            // 仅当显式要求创建或 O_TRUNC 时才创建，否则不应走到这里
+            fs.create(path, overwrite).await?
+        };
+        Ok(FuseWriter::new(
+            &fs.conf().fuse,
+            fs.clone_runtime(),
+            unified_writer,
+        ))
     }
 
     async fn create_reader(fs: &UnifiedFileSystem, path: &Path) -> FuseResult<FuseReader> {
@@ -144,12 +191,18 @@ impl FuseFile {
                     self.path
                 );
             }
-            IoPhase::Writing | IoPhase::SealedToWriting => {}
+            IoPhase::Writing | IoPhase::SealedToWriting => {
+                info!("📝 [FuseFile::write] Already in writing phase: {:?}", self.phase);
+            }
         }
         let writer = match &mut self.writer {
-            Some(v) => v,
+            Some(v) => {
+                info!("✏️ [FuseFile::write] Using existing writer");
+                v
+            },
 
             None => {
+                info!("🔧 [FuseFile::write] Creating new writer - action.write(): {}", action.write());
                 // If opened with write capability (e.g., O_RDWR), allow creating writer
                 if !action.write() {
                     return err_fuse!(libc::EBADF, "Write not permitted for fh on {}", self.path);
@@ -160,33 +213,74 @@ impl FuseFile {
         };
 
         let off = op.arg.offset;
-        let pos = writer.pos() as u64;
         let len = op.data.len() as u64;
-        if off != pos && off + len > pos {
-            return err_fuse!(
-                libc::EIO,
-                "Only sequential write is supported, path={} offset={} size={}, pos={}",
-                writer.path_str(),
-                off,
-                len,
-                pos
-            );
-        }
-
-        if off + len <= pos {
-            // for fulfill vim :wq
-            // Business layer error, but the return to the fuse kernel is successful.
+        
+        // 只跳过真正的零长度写入
+        if len == 0 {
             return err_fuse!(
                 FUSE_SUCCESS,
-                "Skip writing to file {} offset={} size={} when {} bytes has written to file",
+                "Skip zero-length write to file {} offset={} size={}",
                 writer.path_str(),
                 off,
-                len,
-                pos
+                len
             );
         }
 
-        writer.write(op, reply).await?;
+        // Support random writes: perform seek operation to specified offset
+        log::info!(
+            "🎯 [FuseFile::write] About to seek: path={}, offset={}, len={}",
+            self.path.path(),
+            off,
+            len
+        );
+        
+        match writer.seek(off as i64).await {
+            Err(e) => {
+                log::error!(
+                    "❌ [FuseFile::write] Seek failed: path={}, offset={}, error={}",
+                    self.path.path(),
+                    off,
+                    e
+                );
+                return Err(e.into());
+            },
+            Ok(_) => {
+                log::info!(
+                    "✅ [FuseFile::write] Seek succeeded: path={}, offset={}",
+                    self.path.path(),
+                    off
+                );
+            }
+        }
+        
+        log::info!(
+            "📝 [FuseFile::write] About to write: path={}, offset={}, len={}",
+            self.path.path(),
+            off,
+            len
+        );
+        
+        match writer.write(op, reply).await {
+            Err(e) => {
+                log::error!(
+                    "❌ [FuseFile::write] Write failed: path={}, offset={}, len={}, error={}",
+                    self.path.path(),
+                    off,
+                    len,
+                    e
+                );
+                return Err(e.into());
+            },
+            Ok(_) => {
+                log::info!(
+                    "✅ [FuseFile::write] Write succeeded: path={}, offset={}, len={}",
+                    self.path.path(),
+                    off,
+                    len
+                );
+            }
+        }
+        
         Ok(())
     }
 

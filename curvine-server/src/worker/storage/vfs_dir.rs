@@ -282,6 +282,40 @@ impl VfsDir {
         Ok(new_meta)
     }
 
+    // 🔧 Copy-on-Write: 将finalized块复制到writing状态以支持随机写
+    pub fn reopen_finalized_block(&self, finalized_meta: &BlockMeta, new_block: &ExtendedBlock) -> CommonResult<BlockMeta> {
+        // 创建新的writing状态的元数据
+        let cow_meta = BlockMeta::with_cow(finalized_meta, new_block.len, self);
+        
+        // 获取源文件（finalized）和目标文件（writing）路径
+        let src_file = finalized_meta.get_block_path()?;
+        let dst_file = cow_meta.get_block_path()?;
+        
+        log::info!(
+            "🐄 [VfsDir::reopen_finalized_block] Copy-on-write: copying finalized block {} from {:?} to {:?}",
+            finalized_meta.id(),
+            src_file,
+            dst_file
+        );
+        
+        // 确保目标目录存在
+        let parent = try_option!(dst_file.parent());
+        if !parent.exists() {
+            FileUtils::create_dir(parent, true)?;
+        }
+        
+        // 复制文件内容
+        try_err!(fs::copy(&src_file, &dst_file));
+        
+        log::info!(
+            "✅ [VfsDir::reopen_finalized_block] Copy-on-write completed: block {} copied, size: {} bytes",
+            finalized_meta.id(),
+            finalized_meta.len()
+        );
+        
+        Ok(cow_meta)
+    }
+
     // Scan all blocks in the directory
     pub fn scan_blocks(&self) -> CommonResult<Vec<BlockMeta>> {
         let finalized_files = FileUtils::list_files(&self.finalized_dir, true)?;

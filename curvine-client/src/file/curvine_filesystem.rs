@@ -138,12 +138,39 @@ impl CurvineFileSystem {
             .build();
 
         let status = self.fs_client.append(path, opts).await?;
-        let writer = FsWriterBase::new(
-            self.fs_context.clone(),
-            path.clone(),
-            status.file_status,
-            status.last_block,
-        );
+        
+        let writer = if status.file_status.len > 0 {
+            // Existing file: get block information
+            match self.fs_client.get_block_locations(path).await {
+                Ok(file_blocks) => {
+                    FsWriterBase::with_blocks(
+                        self.fs_context.clone(),
+                        path.clone(),
+                        status.file_status,
+                        file_blocks,
+                        status.last_block,
+                    )
+                },
+                Err(_e) => {
+                    // If unable to get block information, fall back to original logic
+                    FsWriterBase::new(
+                        self.fs_context.clone(),
+                        path.clone(),
+                        status.file_status,
+                        status.last_block,
+                    )
+                }
+            }
+        } else {
+            // New file: use original logic
+            FsWriterBase::new(
+                self.fs_context.clone(),
+                path.clone(),
+                status.file_status,
+                status.last_block,
+            )
+        };
+        
         Ok(writer)
     }
 

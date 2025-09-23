@@ -121,6 +121,16 @@ impl BlockMeta {
         }
     }
 
+    // 🔧 创建copy-on-write的块元数据，从finalized状态转换为writing状态
+    pub fn with_cow(finalized_meta: &BlockMeta, new_block_size: i64, dir: &VfsDir) -> Self {
+        Self {
+            id: finalized_meta.id,
+            len: new_block_size,
+            state: BlockState::Writing,
+            dir: dir.state.clone(),
+        }
+    }
+
     pub fn id(&self) -> i64 {
         self.id
     }
@@ -202,7 +212,18 @@ impl BlockMeta {
         if is_append {
             LocalFile::with_append(file)
         } else {
+            // truncate=false 保持现有内容，同时允许 seek + write 进行随机写
             LocalFile::with_write(file, false)
+        }
+    }
+    
+    pub fn create_writer_with_offset(&self, is_append: bool, offset: i64) -> IOResult<LocalFile> {
+        let file = self.get_block_file()?;
+        if is_append {
+            LocalFile::with_append(file)
+        } else {
+            // 对于随机写，使用支持offset的方法
+            LocalFile::with_write_offset(file, false, offset)
         }
     }
 

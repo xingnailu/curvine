@@ -431,14 +431,42 @@ impl MasterFilesystem {
         }
 
         // Verify file length
+        log::info!(
+            "🔍 [MasterFilesystem::complete_file] Starting file completion verification for path={}, submitted_len={}",
+            path.as_ref(),
+            len
+        );
+        
         let commit_len = file.commit_len(last.as_ref());
+        
+        log::info!(
+            "⚖️ [MasterFilesystem::complete_file] Length comparison: path={}, expected_commit_len={}, submitted_len={}, match={}",
+            path.as_ref(),
+            commit_len,
+            len,
+            commit_len == len
+        );
+        
         if commit_len != len {
+            log::error!(
+                "❌ [MasterFilesystem::complete_file] File size mismatch! path={}, expected={}, submitted={}, difference={}",
+                path.as_ref(),
+                commit_len,
+                len,
+                len - commit_len
+            );
+            
             return err_box!(
                 "complete_file file size exception, expected {}, submitted {}",
                 commit_len,
                 len
             );
         }
+        
+        log::info!(
+            "✅ [MasterFilesystem::complete_file] File size verification passed for path={}",
+            path.as_ref()
+        );
 
         // Verify file write status.
         match &file.features.file_write {

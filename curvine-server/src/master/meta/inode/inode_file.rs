@@ -147,14 +147,55 @@ impl InodeFile {
 
     pub fn compute_len(&self) -> i64 {
         let mut sum = 0;
+        log::info!(
+            "🧮 [InodeFile::compute_len] Starting calculation for file_id={}, total_blocks={}",
+            self.id,
+            self.blocks.len()
+        );
+        
         for (i, x) in self.blocks.iter().enumerate() {
-            sum += ternary!(i == self.blocks.len() - 1 && !x.is_committed(), 0, x.len);
+            let is_last = i == self.blocks.len() - 1;
+            let is_committed = x.is_committed();
+            let block_len = if is_last && !is_committed { 0 } else { x.len };
+            
+            log::info!(
+                "📦 [InodeFile::compute_len] Block[{}]: id={}, len={}, committed={}, is_last={}, contributing={}",
+                i, x.id, x.len, is_committed, is_last, block_len
+            );
+            
+            sum += block_len;
         }
+        
+        log::info!(
+            "🧮 [InodeFile::compute_len] Final computed length for file_id={}: {}",
+            self.id,
+            sum
+        );
         sum
     }
 
     pub fn commit_len(&self, last: Option<&CommitBlock>) -> i64 {
-        self.compute_len() + last.map(|x| x.block_len).unwrap_or(0)
+        let computed_len = self.compute_len();
+        let last_block_len = last.map(|x| x.block_len).unwrap_or(0);
+        let total_len = computed_len + last_block_len;
+        
+        log::info!(
+            "📏 [InodeFile::commit_len] file_id={}, computed_len={}, last_block_len={}, total_commit_len={}",
+            self.id,
+            computed_len,
+            last_block_len,
+            total_len
+        );
+        
+        if let Some(commit_block) = last {
+            log::info!(
+                "📋 [InodeFile::commit_len] CommitBlock details: block_id={}, block_len={}",
+                commit_block.block_id,
+                commit_block.block_len
+            );
+        }
+        
+        total_len
     }
 
     fn calc_pos(&self, pos: i32) -> usize {
