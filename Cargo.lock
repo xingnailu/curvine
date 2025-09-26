@@ -1441,6 +1441,7 @@ dependencies = [
  "clap",
  "curvine-client",
  "curvine-common",
+ "curvine-s3-gateway",
  "curvine-ufs",
  "curvine-web",
  "dashmap",
