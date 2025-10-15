@@ -18,6 +18,7 @@ use crate::file::FsContext;
 use curvine_common::state::{BlockLocation, CommitBlock, LocatedBlock, WorkerAddress};
 use curvine_common::FsResult;
 use futures::future::try_join_all;
+use log::info;
 use orpc::err_box;
 use orpc::runtime::{RpcRuntime, Runtime};
 use orpc::sys::DataSlice;
@@ -155,6 +156,16 @@ impl BlockWriter {
     }
 
     pub async fn write(&mut self, chunk: DataSlice) -> FsResult<()> {
+        let len = chunk.len();
+        info!(
+            "[BLOCK_WRITER_DEBUG] block_id={} pos={} write_size={} remaining={} workers={}",
+            self.block_id(),
+            self.pos(),
+            len,
+            self.remaining(),
+            self.inners.len()
+        );
+
         let chunk = chunk.freeze();
         let mut futures = Vec::with_capacity(self.inners.len());
         for writer in self.inners.iter_mut() {
@@ -169,9 +180,23 @@ impl BlockWriter {
         }
 
         if let Err((worker_addr, e)) = try_join_all(futures).await {
+            info!(
+                "[BLOCK_WRITER_ERROR] block_id={} worker={:?} error={}",
+                self.block_id(),
+                worker_addr,
+                e
+            );
             self.fs_context.add_failed_worker(&worker_addr);
             return Err(e);
         }
+
+        info!(
+            "[BLOCK_WRITER_SUCCESS] block_id={} written={} new_pos={} new_remaining={}",
+            self.block_id(),
+            len,
+            self.pos(),
+            self.remaining()
+        );
         Ok(())
     }
 
@@ -210,6 +235,14 @@ impl BlockWriter {
     }
 
     pub async fn complete(&mut self) -> FsResult<CommitBlock> {
+        info!(
+            "[BLOCK_WRITER_COMPLETE_DEBUG] block_id={} pos={} len={} workers={}",
+            self.block_id(),
+            self.pos(),
+            self.len(),
+            self.inners.len()
+        );
+
         let mut futures = Vec::with_capacity(self.inners.len());
         for writer in self.inners.iter_mut() {
             let task = async move {
@@ -222,10 +255,24 @@ impl BlockWriter {
         }
 
         if let Err((worker_addr, e)) = try_join_all(futures).await {
+            info!(
+                "[BLOCK_WRITER_COMPLETE_ERROR] block_id={} worker={:?} error={}",
+                self.block_id(),
+                worker_addr,
+                e
+            );
             self.fs_context.add_failed_worker(&worker_addr);
             return Err(e);
         }
-        Ok(self.to_commit_block())
+
+        let commit_block = self.to_commit_block();
+        info!(
+            "[BLOCK_WRITER_COMPLETE_SUCCESS] block_id={} commit_len={} locations={}",
+            commit_block.block_id,
+            commit_block.block_len,
+            commit_block.locations.len()
+        );
+        Ok(commit_block)
     }
 
     pub async fn cancel(&mut self) -> FsResult<()> {
@@ -278,6 +325,15 @@ impl BlockWriter {
             return Err(format!("Cannot seek to negative position: {pos}").into());
         }
 
+        info!(
+            "[BLOCK_WRITER_SEEK_DEBUG] block_id={} current_pos={} seek_to={} len={} workers={}",
+            self.block_id(),
+            self.pos(),
+            pos,
+            self.len(),
+            self.inners.len()
+        );
+
         let mut futures = Vec::with_capacity(self.inners.len());
         for writer in self.inners.iter_mut() {
             let task = async move {
@@ -290,9 +346,22 @@ impl BlockWriter {
         }
 
         if let Err((worker_addr, e)) = try_join_all(futures).await {
+            info!(
+                "[BLOCK_WRITER_SEEK_ERROR] block_id={} worker={:?} error={}",
+                self.block_id(),
+                worker_addr,
+                e
+            );
             self.fs_context.add_failed_worker(&worker_addr);
             return Err(e);
         }
+
+        info!(
+            "[BLOCK_WRITER_SEEK_SUCCESS] block_id={} new_pos={} remaining={}",
+            self.block_id(),
+            self.pos(),
+            self.remaining()
+        );
         Ok(())
     }
 

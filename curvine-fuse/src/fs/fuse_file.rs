@@ -196,6 +196,16 @@ impl FuseFile {
         let off = op.arg.offset;
         let len = op.data.len() as u64;
 
+        // Debug log for random write tracking
+        info!(
+            "[FUSE_WRITE_DEBUG] path={} offset={} size={} current_pos={} phase={:?}",
+            writer.path_str(),
+            off,
+            len,
+            writer.pos(),
+            self.phase
+        );
+
         // Only skip true zero-length writes
         if len == 0 {
             return err_fuse!(
@@ -209,8 +219,21 @@ impl FuseFile {
 
         // Support random writes: perform seek operation to specified offset
         if let Err(e) = writer.seek(off as i64).await {
+            info!(
+                "[FUSE_SEEK_ERROR] path={} seek_to={} error={}",
+                writer.path_str(),
+                off,
+                e
+            );
             return Err(e.into());
         }
+
+        info!(
+            "[FUSE_SEEK_SUCCESS] path={} seek_to={} new_pos={}",
+            writer.path_str(),
+            off,
+            writer.pos()
+        );
 
         if let Err(e) = writer.write(op, reply).await {
             return Err(e.into());

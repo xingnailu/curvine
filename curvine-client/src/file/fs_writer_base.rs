@@ -17,6 +17,7 @@ use crate::file::{FsClient, FsContext};
 use curvine_common::fs::Path;
 use curvine_common::state::{FileBlocks, FileStatus, LocatedBlock, SearchFileBlocks};
 use curvine_common::FsResult;
+use log::info;
 use orpc::common::FastHashMap;
 use orpc::runtime::{RpcRuntime, Runtime};
 use orpc::sys::DataSlice;
@@ -289,10 +290,33 @@ impl FsWriterBase {
             return Ok(());
         }
 
+        let total_size = chunk.len();
+        let path_str = self.path.to_string();
+        info!(
+            "[CLIENT_WRITE_DEBUG] path={} pos={} size={} max_written_pos={}",
+            path_str,
+            self.pos,
+            total_size,
+            self.max_written_pos
+        );
+
         let mut remaining = chunk.len();
         while remaining > 0 {
             let cur_writer = self.get_writer().await?;
             let write_len = remaining.min(cur_writer.remaining() as usize);
+
+            let block_id = cur_writer.block_id();
+            let writer_pos_before = cur_writer.pos();
+            let writer_remaining = cur_writer.remaining();
+
+            info!(
+                "[CLIENT_BLOCK_WRITE_DEBUG] path={} block_id={} writer_pos={} write_len={} writer_remaining={}",
+                path_str,
+                block_id,
+                writer_pos_before,
+                write_len,
+                writer_remaining
+            );
 
             // Write data request.
             cur_writer.write(chunk.split_to(write_len)).await?;
@@ -317,9 +341,25 @@ impl FsWriterBase {
                         *end = (*end).max(write_end);
                     })
                     .or_insert((write_start, write_end));
+
+                info!(
+                    "[CLIENT_BLOCK_RANGE_UPDATE] path={} block_id={} range=({}, {}) new_pos={}",
+                    path_str,
+                    block_id,
+                    write_start,
+                    write_end,
+                    self.pos
+                );
             }
         }
 
+        info!(
+            "[CLIENT_WRITE_SUCCESS] path={} total_written={} new_pos={} max_written_pos={}",
+            path_str,
+            total_size,
+            self.pos,
+            self.max_written_pos
+        );
         Ok(())
     }
 
@@ -359,20 +399,50 @@ impl FsWriterBase {
     // 1. Submit the last block.
     // 2. Clean up all cached writers.
     pub async fn complete(&mut self) -> FsResult<()> {
+        info!(
+            "[CLIENT_COMPLETE_DEBUG] path={} pos={} max_written_pos={} cached_writers={}",
+            self.path,
+            self.pos,
+            self.max_written_pos,
+            self.all_writers.len()
+        );
+
         // Find the actual last block (sorted by file offset)
         let last_block = self.find_and_complete_last_block().await?;
 
         // Clean up all cached writers
-        for (_, mut writer) in self.all_writers.drain() {
+        let cached_count = self.all_writers.len();
+        for (block_id, mut writer) in self.all_writers.drain() {
+            info!(
+                "[CLIENT_CACHED_WRITER_COMPLETE] path={} block_id={} writer_pos={} writer_len={}",
+                self.path,
+                block_id,
+                writer.pos(),
+                writer.len()
+            );
             writer.complete().await?;
         }
 
         // Calculate correct file length
         let file_length = self.calculate_file_length();
 
+        info!(
+            "[CLIENT_COMPLETE_FILE_DEBUG] path={} calculated_length={} last_block={:?} cached_writers_completed={}",
+            self.path,
+            file_length,
+            last_block.as_ref().map(|b| format!("id={} len={}", b.block_id, b.block_len)),
+            cached_count
+        );
+
         self.fs_client
             .complete_file(&self.path, file_length, last_block)
             .await?;
+
+        info!(
+            "[CLIENT_COMPLETE_SUCCESS] path={} file_length={}",
+            self.path,
+            file_length
+        );
         Ok(())
     }
 
@@ -382,27 +452,62 @@ impl FsWriterBase {
             return Err(format!("Cannot seek to negative position: {pos}").into());
         }
 
+        info!(
+            "[CLIENT_SEEK_DEBUG] path={} current_pos={} seek_to={} max_written_pos={}",
+            self.path,
+            self.pos,
+            pos,
+            self.max_written_pos
+        );
+
         // Check if we have a current writer
         if let Some(writer) = &mut self.cur_writer {
             let block_start = self.pos - writer.pos();
             let block_end = block_start + writer.len();
+
+            info!(
+                "[CLIENT_SEEK_BLOCK_CHECK] path={} block_id={} block_range=({}, {}) seek_pos={}",
+                self.path,
+                writer.block_id(),
+                block_start,
+                block_end,
+                pos
+            );
 
             // If seek position is within current block range, seek directly
             if pos >= block_start && pos < block_end {
                 let block_offset = pos - block_start;
                 writer.seek(block_offset).await?;
                 self.pos = pos;
+                info!(
+                    "[CLIENT_SEEK_WITHIN_BLOCK] path={} block_id={} block_offset={} new_pos={}",
+                    self.path,
+                    writer.block_id(),
+                    block_offset,
+                    pos
+                );
                 return Ok(());
             }
 
             // If seek position is outside current block, clear current writer through update_writer
             // This ensures all writer caching logic is handled consistently in update_writer
+            info!(
+                "[CLIENT_SEEK_SWITCH_BLOCK] path={} old_block_id={} close_writer_times={}",
+                self.path,
+                writer.block_id(),
+                self.close_writer_times
+            );
             self.close_writer_times = self.close_writer_times.saturating_add(1);
             self.update_writer(None).await?;
         }
 
         // Update position
         self.pos = pos;
+        info!(
+            "[CLIENT_SEEK_SUCCESS] path={} new_pos={}",
+            self.path,
+            pos
+        );
         Ok(())
     }
 
@@ -511,7 +616,22 @@ impl FsWriterBase {
     }
 
     async fn allocate_new_block(&mut self) -> FsResult<(i64, BlockWriter)> {
+        info!(
+            "[CLIENT_ALLOCATE_BLOCK_DEBUG] path={} pos={} has_current_writer={} has_pending_commit={}",
+            self.path,
+            self.pos,
+            self.cur_writer.is_some(),
+            self.pending_commit_block.is_some()
+        );
+
         let commit_block = if let Some(mut writer) = self.cur_writer.take() {
+            info!(
+                "[CLIENT_COMPLETE_CURRENT_WRITER] path={} block_id={} writer_pos={} writer_len={}",
+                self.path,
+                writer.block_id(),
+                writer.pos(),
+                writer.len()
+            );
             writer.complete().await?;
             let commit_block = writer.to_commit_block();
 
@@ -520,8 +640,20 @@ impl FsWriterBase {
             self.pending_commit_block.take()
         };
 
+        info!(
+            "[CLIENT_ADD_BLOCK_REQUEST] path={} commit_block={:?}",
+            self.path,
+            commit_block.as_ref().map(|b| format!("id={} len={}", b.block_id, b.block_len))
+        );
+
         // Allocate new block
         let lb = if let Some(lb) = self.last_block.take() {
+            info!(
+                "[CLIENT_USE_LAST_BLOCK] path={} block_id={} block_len={}",
+                self.path,
+                lb.block.id,
+                lb.block.len
+            );
             lb
         } else {
             let located_block = self
@@ -529,6 +661,13 @@ impl FsWriterBase {
                 .add_block(&self.path, commit_block, &self.fs_context.client_addr)
                 .await?;
 
+            info!(
+                "[CLIENT_NEW_BLOCK_ALLOCATED] path={} block_id={} block_len={} locations={}",
+                self.path,
+                located_block.block.id,
+                located_block.block.len,
+                located_block.locs.len()
+            );
             located_block
         };
 
@@ -537,6 +676,13 @@ impl FsWriterBase {
         // Update file_blocks structure
         let block_size = self.fs_context.block_size();
         self.add_block_to_file_blocks(lb.block.id, block_size, lb.locs.clone());
+
+        info!(
+            "[CLIENT_ALLOCATE_BLOCK_SUCCESS] path={} new_block_id={} block_size={} writer_created=true",
+            self.path,
+            lb.block.id,
+            block_size
+        );
 
         Ok((0, writer)) // New block offset is 0
     }

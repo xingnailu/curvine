@@ -21,7 +21,7 @@ use curvine_common::error::FsError;
 use curvine_common::fs::{Path, Writer};
 use curvine_common::state::FileStatus;
 use curvine_common::FsResult;
-use log::error;
+use log::{error, info};
 use orpc::runtime::{RpcRuntime, Runtime};
 use orpc::sync::channel::{AsyncChannel, AsyncReceiver, AsyncSender, CallChannel, CallSender};
 use orpc::sync::ErrorMonitor;
@@ -104,6 +104,13 @@ impl FuseWriter {
     }
 
     pub async fn complete(&mut self) -> FsResult<()> {
+        info!(
+            "[FUSE_COMPLETE_DEBUG] path={} final_pos={} status={:?}",
+            self.path_str(),
+            self.pos,
+            self.status
+        );
+
         let res: FsResult<()> = {
             let (rx, tx) = CallChannel::channel();
             self.sender.send(WriteTask::Complete(rx)).await?;
@@ -112,8 +119,22 @@ impl FuseWriter {
         };
 
         match res {
-            Err(e) => Err(self.check_error(e)),
-            Ok(_) => Ok(()),
+            Err(e) => {
+                info!(
+                    "[FUSE_COMPLETE_ERROR] path={} error={}",
+                    self.path_str(),
+                    e
+                );
+                Err(self.check_error(e))
+            }
+            Ok(_) => {
+                info!(
+                    "[FUSE_COMPLETE_SUCCESS] path={} final_size={}",
+                    self.path_str(),
+                    self.pos
+                );
+                Ok(())
+            }
         }
     }
 
@@ -182,7 +203,15 @@ impl FuseWriter {
                 }
 
                 WriteTask::Complete(tx) => {
+                    info!(
+                        "[FUSE_WRITER_COMPLETE_DEBUG] path={} calling writer.complete()",
+                        writer.path()
+                    );
                     writer.complete().await?;
+                    info!(
+                        "[FUSE_WRITER_COMPLETE_SUCCESS] path={} writer.complete() finished",
+                        writer.path()
+                    );
                     tx.send(1)?;
                 }
 
