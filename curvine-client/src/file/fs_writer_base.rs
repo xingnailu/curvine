@@ -217,48 +217,123 @@ impl FsWriterBase {
         self.max_written_pos
     }
 
-    // Find and complete the actual last block
     async fn find_and_complete_last_block(
         &mut self,
     ) -> FsResult<Option<curvine_common::state::CommitBlock>> {
-        // Collect all possible block writers and their position info
-        let mut block_writers = Vec::new();
+        // First, complete all cached writers
+        let mut completed_writers = Vec::new();
 
-        // 1. Add current writer
-        if let Some(writer) = self.cur_writer.take() {
+        // 1. Complete current writer
+        if let Some(mut writer) = self.cur_writer.take() {
             let block_id = writer.block_id();
-            let block_pos = self.get_block_position(block_id);
-            block_writers.push((block_pos, writer));
-        }
-
-        // 2. Add cached writers
-        let cached_writers: Vec<_> = self.all_writers.drain().collect();
-        for (block_id, writer) in cached_writers {
-            let block_pos = self.get_block_position(block_id);
-            block_writers.push((block_pos, writer));
-        }
-
-        if block_writers.is_empty() {
-            return Ok(None);
-        }
-
-        // 3. Sort by position and find the last block
-        block_writers.sort_by_key(|(pos, _)| *pos);
-
-        let mut last_commit_block = None;
-
-        // 4. Complete all writers, keep the last one as CommitBlock
-        let total_writers = block_writers.len();
-        for (i, (_block_pos, mut writer)) in block_writers.into_iter().enumerate() {
-            let is_last = i == total_writers - 1;
             writer.complete().await?;
+            completed_writers.push(block_id);
+        }
 
-            if is_last {
-                last_commit_block = Some(writer.to_commit_block());
+        // 2. Complete all cached writers
+        let cached_writers: Vec<_> = self.all_writers.drain().collect();
+        for (block_id, mut writer) in cached_writers {
+            writer.complete().await?;
+            completed_writers.push(block_id);
+        }
+
+        // 3. Find the block with maximum block ID as the last block
+        let last_block_id = self.find_max_block_id()?;
+
+        match last_block_id {
+            Some(block_id) => {
+                // Create CommitBlock for the last block
+                let commit_block = self.create_commit_block_for_last_block(block_id)?;
+                Ok(Some(commit_block))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn find_max_block_id(&self) -> FsResult<Option<i64>> {
+        let mut max_block_id = None;
+
+        // Check file_blocks first (existing blocks)
+        if let Some(file_blocks) = &self.file_blocks {
+            for located_block in &file_blocks.block_locs {
+                let block_id = located_block.block.id;
+                max_block_id = Some(
+                    max_block_id.map_or(block_id, |current_max: i64| current_max.max(block_id)),
+                );
             }
         }
 
-        Ok(last_commit_block)
+        // Also check block_write_ranges for any newly allocated blocks not yet in file_blocks
+        for &block_id in self.block_write_ranges.keys() {
+            max_block_id =
+                Some(max_block_id.map_or(block_id, |current_max: i64| current_max.max(block_id)));
+        }
+
+        Ok(max_block_id)
+    }
+
+    fn create_commit_block_for_last_block(
+        &self,
+        block_id: i64,
+    ) -> FsResult<curvine_common::state::CommitBlock> {
+        // Try to get block info from file_blocks first
+        if let Some(file_blocks) = &self.file_blocks {
+            for located_block in &file_blocks.block_locs {
+                if located_block.block.id == block_id {
+                    // Calculate the actual block length based on write ranges
+                    let block_len =
+                        if let Some((_start, end)) = self.block_write_ranges.get(&block_id) {
+                            // Use actual written length
+                            let block_size = self.fs_context.block_size();
+                            let block_start = self.get_block_position(block_id);
+                            (*end - block_start).min(block_size)
+                        } else {
+                            // Fallback: use max_written_pos if this block overlaps with written area
+                            let block_size = self.fs_context.block_size();
+                            let block_start = self.get_block_position(block_id);
+
+                            if self.max_written_pos > block_start {
+                                (self.max_written_pos - block_start).min(block_size)
+                            } else {
+                                // Use the block's recorded length from file_blocks
+                                located_block.block.len
+                            }
+                        };
+
+                    // Convert worker addresses to block locations
+                    let locations = located_block
+                        .locs
+                        .iter()
+                        .map(|addr| curvine_common::state::BlockLocation::with_id(addr.worker_id))
+                        .collect();
+
+                    let commit_block = curvine_common::state::CommitBlock {
+                        block_id,
+                        block_len,
+                        locations,
+                    };
+
+                    return Ok(commit_block);
+                }
+            }
+        }
+
+        // If not found in file_blocks, create a commit block based on write_ranges
+        let block_len = if let Some((_start, end)) = self.block_write_ranges.get(&block_id) {
+            let block_start = self.get_block_position(block_id);
+            *end - block_start
+        } else {
+            // This shouldn't happen for a valid last block, but provide a fallback
+            0
+        };
+
+        let commit_block = curvine_common::state::CommitBlock {
+            block_id,
+            block_len,
+            locations: vec![], // Empty locations, will be filled by server
+        };
+
+        Ok(commit_block)
     }
 
     // Get block position in file (for sorting)
@@ -417,7 +492,7 @@ impl FsWriterBase {
                 old.complete().await?;
                 let commit_block = old.to_commit_block();
                 self.pending_commit_block = Some(commit_block);
-            } else if has_data && self.close_writer_times <= self.close_writer_limit {
+            } else if has_data && self.close_writer_times > self.close_writer_limit {
                 // Block has data but not full, cache for reuse
                 self.all_writers.insert(block_id, old);
             } else {
@@ -450,11 +525,11 @@ impl FsWriterBase {
                                 }
                                 None => {
                                     // Create new block writer, then seek to correct position
-                                    let mut new_writer = BlockWriter::new(
-                                        self.fs_context.clone(),
-                                        located_block.clone(),
-                                    )
-                                    .await?;
+                                    let mut corrected_block = located_block.clone();
+                                    corrected_block.block.len = 0;
+                                    let mut new_writer =
+                                        BlockWriter::new(self.fs_context.clone(), corrected_block)
+                                            .await?;
                                     new_writer.seek(block_off).await?;
                                     new_writer
                                 }
@@ -480,9 +555,11 @@ impl FsWriterBase {
                                             cached_writer
                                         }
                                         None => {
+                                            let mut corrected_block = located_block.clone();
+                                            corrected_block.block.len = 0;
                                             let mut new_writer = BlockWriter::new(
                                                 self.fs_context.clone(),
-                                                located_block.clone(),
+                                                corrected_block,
                                             )
                                             .await?;
                                             new_writer.seek(block_off).await?;
