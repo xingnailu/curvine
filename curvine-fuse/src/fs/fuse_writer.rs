@@ -154,13 +154,33 @@ impl FuseWriter {
 
     // Random write seek support
     pub async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        info!(
+            "[FUSE_WRITER_SEEK_DEBUG] path={} current_pos={} seek_to={} status={:?}",
+            self.path_str(),
+            self.pos,
+            pos,
+            self.status
+        );
+
         let res: FsResult<()> = {
             let (rx, tx) = CallChannel::channel();
             if let Err(e) = self.sender.send(WriteTask::Seek((pos, rx))).await {
+                info!(
+                    "[FUSE_WRITER_SEEK_SEND_ERROR] path={} seek_to={} error={}",
+                    self.path_str(),
+                    pos,
+                    e
+                );
                 return Err(e.into());
             }
 
             if let Err(e) = tx.receive().await {
+                info!(
+                    "[FUSE_WRITER_SEEK_RECEIVE_ERROR] path={} seek_to={} error={}",
+                    self.path_str(),
+                    pos,
+                    e
+                );
                 return Err(e.into());
             }
             Ok(())
@@ -172,8 +192,24 @@ impl FuseWriter {
         }
 
         match res {
-            Err(e) => Err(self.check_error(e)),
-            Ok(_) => Ok(()),
+            Err(e) => {
+                info!(
+                    "[FUSE_WRITER_SEEK_ERROR] path={} seek_to={} error={}",
+                    self.path_str(),
+                    pos,
+                    e
+                );
+                Err(self.check_error(e))
+            }
+            Ok(_) => {
+                info!(
+                    "[FUSE_WRITER_SEEK_SUCCESS] path={} seek_to={} new_pos={}",
+                    self.path_str(),
+                    pos,
+                    self.pos
+                );
+                Ok(())
+            }
         }
     }
 
@@ -222,8 +258,30 @@ impl FuseWriter {
 
                 // Handle random write seek task
                 WriteTask::Seek((pos, tx)) => {
-                    writer.seek(pos).await?;
-                    tx.send(1)?;
+                    info!(
+                        "[FUSE_WRITER_TASK_SEEK_DEBUG] path={} calling writer.seek({})",
+                        writer.path(),
+                        pos
+                    );
+                    match writer.seek(pos).await {
+                        Ok(_) => {
+                            info!(
+                                "[FUSE_WRITER_TASK_SEEK_SUCCESS] path={} writer.seek({}) finished",
+                                writer.path(),
+                                pos
+                            );
+                            tx.send(1)?;
+                        }
+                        Err(e) => {
+                            info!(
+                                "[FUSE_WRITER_TASK_SEEK_ERROR] path={} writer.seek({}) failed: {}",
+                                writer.path(),
+                                pos,
+                                e
+                            );
+                            return Err(e);
+                        }
+                    }
                 }
             }
         }

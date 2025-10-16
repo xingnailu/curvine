@@ -15,6 +15,7 @@
 use crate::fs::Path;
 use crate::state::FileStatus;
 use crate::FsResult;
+use log::info;
 use orpc::err_box;
 use orpc::runtime::RpcRuntime;
 use orpc::{runtime::Runtime, sys::DataSlice};
@@ -106,12 +107,36 @@ pub trait Writer {
     // Random write seek support
     fn seek(&mut self, pos: i64) -> impl Future<Output = FsResult<()>> {
         async move {
+            info!(
+                "[WRITER_TRAIT_SEEK_DEBUG] path={} current_pos={} seek_to={}",
+                self.path(),
+                self.pos(),
+                pos
+            );
+            
             if pos < 0 {
+                info!(
+                    "[WRITER_TRAIT_SEEK_ERROR] path={} negative position: {}",
+                    self.path(),
+                    pos
+                );
                 return err_box!(format!("Cannot seek to negative position: {}", pos));
             }
+            
             // Default implementation: flush buffer, update position
+            info!(
+                "[WRITER_TRAIT_SEEK_FLUSH] path={} flushing before seek to {}",
+                self.path(),
+                pos
+            );
             self.flush_chunk().await?;
+            
             *self.pos_mut() = pos;
+            info!(
+                "[WRITER_TRAIT_SEEK_SUCCESS] path={} seek completed, new_pos={}",
+                self.path(),
+                pos
+            );
             Ok(())
         }
     }

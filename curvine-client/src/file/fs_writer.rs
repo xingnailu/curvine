@@ -122,18 +122,64 @@ impl Writer for FsWriter {
     }
 
     async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        info!(
+            "[FS_WRITER_SEEK_DEBUG] path={} current_pos={} seek_to={} buffer_len={}",
+            self.path(),
+            self.pos,
+            pos,
+            self.buf.len()
+        );
+
         if pos < 0 {
+            info!(
+                "[FS_WRITER_SEEK_ERROR] path={} negative position: {}",
+                self.path(),
+                pos
+            );
             return err_box!(format!("Cannot seek to negative position: {}", pos));
         }
 
         // Flush current buffer
+        info!(
+            "[FS_WRITER_SEEK_FLUSH] path={} flushing buffer (len={}) before seek to {}",
+            self.path(),
+            self.buf.len(),
+            pos
+        );
         self.flush_chunk().await?;
 
         // Delegate to inner writer to execute seek
-        self.inner.seek(pos).await?;
+        info!(
+            "[FS_WRITER_SEEK_DELEGATE] path={} calling inner.seek({})",
+            self.path(),
+            pos
+        );
+        match self.inner.seek(pos).await {
+            Ok(_) => {
+                info!(
+                    "[FS_WRITER_SEEK_INNER_SUCCESS] path={} inner.seek({}) completed",
+                    self.path(),
+                    pos
+                );
+            }
+            Err(e) => {
+                info!(
+                    "[FS_WRITER_SEEK_INNER_ERROR] path={} inner.seek({}) failed: {}",
+                    self.path(),
+                    pos,
+                    e
+                );
+                return Err(e);
+            }
+        }
 
         // Update current position
         self.pos = pos;
+        info!(
+            "[FS_WRITER_SEEK_SUCCESS] path={} seek completed, new_pos={}",
+            self.path(),
+            pos
+        );
         Ok(())
     }
 }

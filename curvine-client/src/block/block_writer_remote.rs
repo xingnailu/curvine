@@ -17,6 +17,7 @@ use crate::file::FsContext;
 use curvine_common::proto::DataHeaderProto;
 use curvine_common::state::{ExtendedBlock, WorkerAddress};
 use curvine_common::FsResult;
+use log::info;
 use orpc::common::Utils;
 use orpc::err_box;
 use orpc::sys::DataSlice;
@@ -162,11 +163,32 @@ impl BlockWriterRemote {
     }
 
     pub async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        info!(
+            "[BLOCK_WRITER_REMOTE_SEEK_DEBUG] block_id={} current_pos={} max_written_pos={} seek_to={} len={} worker={:?}",
+            self.block.id,
+            self.pos,
+            self.max_written_pos,
+            pos,
+            self.len,
+            self.worker_address
+        );
+
         if pos < 0 {
+            info!(
+                "[BLOCK_WRITER_REMOTE_SEEK_ERROR] block_id={} negative position: {}",
+                self.block.id,
+                pos
+            );
             return Err(format!("Cannot seek to negative position: {pos}").into());
         }
 
         if pos >= self.len {
+            info!(
+                "[BLOCK_WRITER_REMOTE_SEEK_ERROR] block_id={} position {} exceeds capacity {}",
+                self.block.id,
+                pos,
+                self.len
+            );
             return Err(format!("Seek position {pos} exceeds block capacity {}", self.len).into());
         }
 
@@ -177,6 +199,12 @@ impl BlockWriterRemote {
             flush: false,
             is_last: false,
         });
+
+        info!(
+            "[BLOCK_WRITER_REMOTE_SEEK_SUCCESS] block_id={} seek to {} completed, pending_header set",
+            self.block.id,
+            pos
+        );
 
         Ok(())
     }

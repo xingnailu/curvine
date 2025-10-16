@@ -15,6 +15,7 @@
 use crate::file::FsContext;
 use curvine_common::state::{ExtendedBlock, WorkerAddress};
 use curvine_common::FsResult;
+use log::info;
 use orpc::common::Utils;
 use orpc::io::LocalFile;
 use orpc::runtime::{RpcRuntime, Runtime};
@@ -165,21 +166,67 @@ impl BlockWriterLocal {
     }
 
     pub async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        info!(
+            "[BLOCK_WRITER_LOCAL_SEEK_DEBUG] block_id={} current_pos={} max_written_pos={} seek_to={} len={}",
+            self.block.id,
+            self.pos(),
+            self.max_written_pos,
+            pos,
+            self.len
+        );
+
         if pos < 0 {
+            info!(
+                "[BLOCK_WRITER_LOCAL_SEEK_ERROR] block_id={} negative position: {}",
+                self.block.id,
+                pos
+            );
             return Err(format!("Cannot seek to negative position: {pos}").into());
         }
 
         if pos >= self.len {
+            info!(
+                "[BLOCK_WRITER_LOCAL_SEEK_ERROR] block_id={} position {} exceeds capacity {}",
+                self.block.id,
+                pos,
+                self.len
+            );
             return Err(format!("Seek position {pos} exceeds block capacity {}", self.len).into());
         }
 
         // For local files, call seek directly
+        info!(
+            "[BLOCK_WRITER_LOCAL_SEEK_FILE] block_id={} calling file.seek({})",
+            self.block.id,
+            pos
+        );
         let file = self.file.clone();
-        self.rt
-            .spawn_blocking(move || {
+        let result = self.rt
+            .spawn_blocking(move || -> FsResult<()> {
                 file.as_mut().seek(pos)?;
                 Ok(())
             })
-            .await?
+            .await?;
+
+        match result {
+            Ok(_) => {
+                info!(
+                    "[BLOCK_WRITER_LOCAL_SEEK_SUCCESS] block_id={} seek to {} completed, new_pos={}",
+                    self.block.id,
+                    pos,
+                    self.pos()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                info!(
+                    "[BLOCK_WRITER_LOCAL_SEEK_ERROR] block_id={} seek to {} failed: {}",
+                    self.block.id,
+                    pos,
+                    e
+                );
+                Err(e)
+            }
+        }
     }
 }
