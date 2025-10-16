@@ -15,6 +15,7 @@
 use curvine_common::proto::{BlockReadRequest, BlockWriteRequest};
 use curvine_common::state::ExtendedBlock;
 use curvine_common::FsResult;
+use log::info;
 use orpc::message::Message;
 
 pub struct WriteContext {
@@ -48,6 +49,18 @@ impl WriteContext {
             len: req.len,
             is_append,
         };
+
+        info!(
+            "[WRITE_CONTEXT_CREATE] block_id={} req_id={} off={} len={} block_len={} is_append={} chunk_size={} short_circuit={}",
+            context.block.id,
+            context.req_id,
+            context.off,
+            context.len,
+            context.block.len,
+            context.is_append,
+            context.chunk_size,
+            context.short_circuit
+        );
 
         Ok(context)
     }

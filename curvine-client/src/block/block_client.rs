@@ -24,6 +24,7 @@ use curvine_common::proto::{
 };
 use curvine_common::state::{ExtendedBlock, StorageType};
 use curvine_common::FsResult;
+use log::info;
 use orpc::client::RpcClient;
 use orpc::message::{Builder, Message, RequestStatus};
 use orpc::sys::DataSlice;
@@ -64,6 +65,20 @@ impl BlockClient {
         chunk_size: i32,
         short_circuit: bool,
     ) -> FsResult<CreateBlockContext> {
+        info!(
+            "[BLOCK_CLIENT_WRITE_BLOCK] block_id={} off={} len={} block_len={} req_id={} seq_id={} chunk_size={} short_circuit={} storage_type={:?} file_type={:?}",
+            blk.id,
+            off,
+            len,
+            blk.len,
+            req_id,
+            seq_id,
+            chunk_size,
+            short_circuit,
+            blk.storage_type,
+            blk.file_type
+        );
+
         let header = BlockWriteRequest {
             id: blk.id,
             off,
@@ -94,6 +109,15 @@ impl BlockClient {
             path: rep_header.path,
         };
 
+        info!(
+            "[BLOCK_CLIENT_WRITE_BLOCK_RESPONSE] block_id={} response_off={} response_len={} storage_type={:?} path={:?}",
+            context.id,
+            context.off,
+            context.len,
+            context.storage_type,
+            context.path
+        );
+
         Ok(context)
     }
 
@@ -104,6 +128,16 @@ impl BlockClient {
         seq_id: i32,
         header: Option<DataHeaderProto>,
     ) -> CommonResult<()> {
+        let data_len = buf.len();
+
+        info!(
+            "[BLOCK_CLIENT_WRITE_DATA] req_id={} seq_id={} data_len={} header={:?}",
+            req_id,
+            seq_id,
+            data_len,
+            header
+        );
+
         let mut builder = Builder::new()
             .code(RpcCode::WriteBlock)
             .request(RequestStatus::Running)
@@ -117,10 +151,25 @@ impl BlockClient {
 
         let msg = builder.build();
         let _ = self.rpc(msg).await?;
+
+        info!(
+            "[BLOCK_CLIENT_WRITE_DATA_SUCCESS] req_id={} seq_id={} data_len={}",
+            req_id,
+            seq_id,
+            data_len
+        );
+
         Ok(())
     }
 
     pub async fn write_flush(&self, pos: i64, req_id: i64, seq_id: i32) -> CommonResult<()> {
+        info!(
+            "[BLOCK_CLIENT_WRITE_FLUSH] req_id={} seq_id={} pos={}",
+            req_id,
+            seq_id,
+            pos
+        );
+
         let header = DataHeaderProto {
             offset: pos,
             flush: true,
@@ -135,6 +184,14 @@ impl BlockClient {
             .proto_header(header)
             .build();
         let _ = self.rpc(msg).await?;
+
+        info!(
+            "[BLOCK_CLIENT_WRITE_FLUSH_SUCCESS] req_id={} seq_id={} pos={}",
+            req_id,
+            seq_id,
+            pos
+        );
+
         Ok(())
     }
 
@@ -148,6 +205,17 @@ impl BlockClient {
         seq_id: i32,
         cancel: bool,
     ) -> FsResult<()> {
+        info!(
+            "[BLOCK_CLIENT_WRITE_COMMIT] block_id={} off={} len={} block_len={} req_id={} seq_id={} cancel={}",
+            block.id,
+            off,
+            len,
+            block.len,
+            req_id,
+            seq_id,
+            cancel
+        );
+
         let header = BlockWriteRequest {
             id: block.id,
             off,
@@ -173,6 +241,15 @@ impl BlockClient {
             .build();
 
         let _ = self.rpc(msg).await?;
+
+        info!(
+            "[BLOCK_CLIENT_WRITE_COMMIT_SUCCESS] block_id={} off={} len={} cancel={}",
+            block.id,
+            off,
+            len,
+            cancel
+        );
+
         Ok(())
     }
 

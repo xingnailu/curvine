@@ -512,22 +512,88 @@ impl FsWriterBase {
     }
 
     async fn update_writer(&mut self, cur: Option<BlockWriter>) -> FsResult<()> {
+        // Log new writer info before moving it
+        if let Some(ref new_writer) = cur {
+            info!(
+                "[WRITER_LIFECYCLE_SET_CURRENT] path={} new_block_id={} pos={} len={} remaining={}",
+                self.path,
+                new_writer.block_id(),
+                new_writer.pos(),
+                new_writer.len(),
+                new_writer.remaining()
+            );
+        }
+
         if let Some(mut old) = mem::replace(&mut self.cur_writer, cur) {
             let block_id = old.block_id();
             let has_data = old.pos() > 0;
             let is_full = !old.has_remaining();
+            let writer_pos = old.pos();
+            let writer_len = old.len();
+            let remaining = old.remaining();
+
+            info!(
+                "[WRITER_LIFECYCLE_UPDATE] path={} old_block_id={} has_data={} is_full={} pos={} len={} remaining={} cached_count={}",
+                self.path,
+                block_id,
+                has_data,
+                is_full,
+                writer_pos,
+                writer_len,
+                remaining,
+                self.all_writers.len()
+            );
 
             if is_full {
+                info!(
+                    "[WRITER_LIFECYCLE_COMPLETE_FULL] path={} block_id={} completing_full_block",
+                    self.path,
+                    block_id
+                );
                 // Block is full, must complete it and save commit block for next allocation
                 old.complete().await?;
                 let commit_block = old.to_commit_block();
+                let commit_len = commit_block.block_len;
                 self.pending_commit_block = Some(commit_block);
+                info!(
+                    "[WRITER_LIFECYCLE_PENDING_COMMIT] path={} block_id={} commit_len={}",
+                    self.path,
+                    block_id,
+                    commit_len
+                );
             } else if has_data && self.close_writer_times <= self.close_writer_limit {
+                info!(
+                    "[WRITER_LIFECYCLE_CACHE] path={} block_id={} caching_writer pos={} close_times={} limit={}",
+                    self.path,
+                    block_id,
+                    writer_pos,
+                    self.close_writer_times,
+                    self.close_writer_limit
+                );
                 // Block has data but not full, cache for reuse
                 self.all_writers.insert(block_id, old);
+                info!(
+                    "[WRITER_LIFECYCLE_CACHED] path={} block_id={} cached_count={}",
+                    self.path,
+                    block_id,
+                    self.all_writers.len()
+                );
             } else {
+                info!(
+                    "[WRITER_LIFECYCLE_COMPLETE_CLOSE] path={} block_id={} completing_and_closing has_data={} close_times={} limit={}",
+                    self.path,
+                    block_id,
+                    has_data,
+                    self.close_writer_times,
+                    self.close_writer_limit
+                );
                 // Either no data or cache limit exceeded, complete and close
                 old.complete().await?;
+                info!(
+                    "[WRITER_LIFECYCLE_COMPLETED] path={} block_id={} writer_closed",
+                    self.path,
+                    block_id
+                );
             }
         }
 
@@ -536,24 +602,65 @@ impl FsWriterBase {
 
     async fn get_writer(&mut self) -> FsResult<&mut BlockWriter> {
         match &self.cur_writer {
-            Some(v) if v.has_remaining() => {}
+            Some(v) if v.has_remaining() => {
+                info!(
+                    "[WRITER_LIFECYCLE_REUSE] path={} pos={} block_id={} remaining={} writer_pos={}",
+                    self.path,
+                    self.pos,
+                    v.block_id(),
+                    v.remaining(),
+                    v.pos()
+                );
+            }
 
             _ => {
-                if let Some(_v) = &self.cur_writer {}
+                if let Some(v) = &self.cur_writer {
+                    info!(
+                        "[WRITER_LIFECYCLE_REPLACE] path={} pos={} old_block_id={} old_remaining={} cached_writers={}",
+                        self.path,
+                        self.pos,
+                        v.block_id(),
+                        v.remaining(),
+                        self.all_writers.len()
+                    );
+                }
 
                 let (_block_off, lb) = if let Some(file_blocks) = &self.file_blocks {
                     // Try to find in existing file blocks
                     match file_blocks.get_write_block(self.pos) {
                         Ok((block_off, located_block)) => {
+                            info!(
+                                "[WRITER_LIFECYCLE_EXISTING_BLOCK] path={} pos={} block_id={} block_off={} cached_count={}",
+                                self.path,
+                                self.pos,
+                                located_block.block.id,
+                                block_off,
+                                self.all_writers.len()
+                            );
+
                             // Found existing block, check if there's a cached writer
                             let new_writer = match self.all_writers.remove(&located_block.block.id)
                             {
                                 Some(mut cached_writer) => {
+                                    info!(
+                                        "[WRITER_LIFECYCLE_CACHE_HIT] path={} block_id={} seek_to={} writer_pos={} writer_len={}",
+                                        self.path,
+                                        located_block.block.id,
+                                        block_off,
+                                        cached_writer.pos(),
+                                        cached_writer.len()
+                                    );
                                     // Use cached block writer, but need to seek to correct position
                                     cached_writer.seek(block_off).await?;
                                     cached_writer
                                 }
                                 None => {
+                                    info!(
+                                        "[WRITER_LIFECYCLE_CACHE_MISS] path={} block_id={} creating_new_writer seek_to={}",
+                                        self.path,
+                                        located_block.block.id,
+                                        block_off
+                                    );
                                     // Create new block writer, then seek to correct position
                                     let mut new_writer = BlockWriter::new(
                                         self.fs_context.clone(),
@@ -568,6 +675,11 @@ impl FsWriterBase {
                             (block_off, new_writer)
                         }
                         Err(_) => {
+                            info!(
+                                "[WRITER_LIFECYCLE_ALLOCATE_NEW] path={} pos={} exceeds_file_range",
+                                self.path,
+                                self.pos
+                            );
                             // Position exceeds file range, need to allocate new block
                             self.allocate_new_block().await?
                         }
@@ -577,14 +689,33 @@ impl FsWriterBase {
                     if let Some(file_blocks) = &self.file_blocks {
                         match file_blocks.get_write_block(self.pos) {
                             Ok((block_off, located_block)) => {
+                                info!(
+                                    "[WRITER_LIFECYCLE_NEW_FILE_EXISTING_BLOCK] path={} pos={} block_id={} block_off={}",
+                                    self.path,
+                                    self.pos,
+                                    located_block.block.id,
+                                    block_off
+                                );
+
                                 // Check cached writer
                                 let new_writer =
                                     match self.all_writers.remove(&located_block.block.id) {
                                         Some(mut cached_writer) => {
+                                            info!(
+                                                "[WRITER_LIFECYCLE_NEW_FILE_CACHE_HIT] path={} block_id={} seek_to={}",
+                                                self.path,
+                                                located_block.block.id,
+                                                block_off
+                                            );
                                             cached_writer.seek(block_off).await?;
                                             cached_writer
                                         }
                                         None => {
+                                            info!(
+                                                "[WRITER_LIFECYCLE_NEW_FILE_CACHE_MISS] path={} block_id={} creating_new_writer",
+                                                self.path,
+                                                located_block.block.id
+                                            );
                                             let mut new_writer = BlockWriter::new(
                                                 self.fs_context.clone(),
                                                 located_block.clone(),
@@ -597,9 +728,21 @@ impl FsWriterBase {
 
                                 (block_off, new_writer)
                             }
-                            Err(_) => self.allocate_new_block().await?,
+                            Err(_) => {
+                                info!(
+                                    "[WRITER_LIFECYCLE_NEW_FILE_ALLOCATE] path={} pos={}",
+                                    self.path,
+                                    self.pos
+                                );
+                                self.allocate_new_block().await?
+                            }
                         }
                     } else {
+                        info!(
+                            "[WRITER_LIFECYCLE_FIRST_BLOCK] path={} pos={} allocating_first_block",
+                            self.path,
+                            self.pos
+                        );
                         // Truly new file, allocate first block
                         self.allocate_new_block().await?
                     }

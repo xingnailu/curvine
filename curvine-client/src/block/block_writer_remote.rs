@@ -78,6 +78,17 @@ impl BlockWriterRemote {
             pending_header: None,
         };
 
+        info!(
+            "[BLOCK_WRITER_REMOTE_CREATED] block_id={} worker={:?} pos={} len={} max_written_pos={} req_id={} seq_id={}",
+            writer.block.id,
+            writer.worker_address,
+            pos,
+            len,
+            writer.max_written_pos,
+            req_id,
+            seq_id
+        );
+
         Ok(writer)
     }
 
@@ -113,8 +124,18 @@ impl BlockWriterRemote {
 
     // Write complete
     pub async fn complete(&mut self) -> FsResult<()> {
+        info!(
+            "[BLOCK_WRITER_REMOTE_COMPLETE] block_id={} pos={} max_written_pos={} len={} req_id={} worker={:?}",
+            self.block.id,
+            self.pos,
+            self.max_written_pos,
+            self.len,
+            self.req_id,
+            self.worker_address
+        );
+
         let next_seq_id = self.next_seq_id();
-        self.client
+        let result = self.client
             .write_commit(
                 &self.block,
                 self.pos,
@@ -123,13 +144,42 @@ impl BlockWriterRemote {
                 next_seq_id,
                 false,
             )
-            .await?;
+            .await;
+
+        match &result {
+            Ok(_) => {
+                info!(
+                    "[BLOCK_WRITER_REMOTE_COMPLETE_SUCCESS] block_id={} committed pos={} len={}",
+                    self.block.id,
+                    self.pos,
+                    self.len
+                );
+            }
+            Err(e) => {
+                info!(
+                    "[BLOCK_WRITER_REMOTE_COMPLETE_ERROR] block_id={} error={}",
+                    self.block.id,
+                    e
+                );
+            }
+        }
+
+        result?;
         Ok(())
     }
 
     pub async fn cancel(&mut self) -> FsResult<()> {
+        info!(
+            "[BLOCK_WRITER_REMOTE_CANCEL] block_id={} pos={} len={} req_id={} worker={:?}",
+            self.block.id,
+            self.pos,
+            self.len,
+            self.req_id,
+            self.worker_address
+        );
+
         let next_seq_id = self.next_seq_id();
-        self.client
+        let result = self.client
             .write_commit(
                 &self.block,
                 self.pos,
@@ -138,7 +188,25 @@ impl BlockWriterRemote {
                 next_seq_id,
                 true,
             )
-            .await
+            .await;
+
+        match &result {
+            Ok(_) => {
+                info!(
+                    "[BLOCK_WRITER_REMOTE_CANCEL_SUCCESS] block_id={} cancelled",
+                    self.block.id
+                );
+            }
+            Err(e) => {
+                info!(
+                    "[BLOCK_WRITER_REMOTE_CANCEL_ERROR] block_id={} error={}",
+                    self.block.id,
+                    e
+                );
+            }
+        }
+
+        result
     }
 
     // Get the number of bytes left to writable in the current block.

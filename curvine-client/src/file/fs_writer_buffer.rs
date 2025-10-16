@@ -17,7 +17,7 @@ use curvine_common::error::FsError;
 use curvine_common::fs::Path;
 use curvine_common::state::FileStatus;
 use curvine_common::FsResult;
-use log::error;
+use log::{error, info};
 use orpc::runtime::RpcRuntime;
 use orpc::sync::channel::{AsyncChannel, AsyncReceiver, AsyncSender, CallChannel, CallSender};
 use orpc::sync::ErrorMonitor;
@@ -165,27 +165,86 @@ impl FsWriterBuffer {
     }
 
     pub async fn seek(&mut self, pos: i64) -> FsResult<()> {
+        info!(
+            "[FS_WRITER_BUFFER_SEEK_START] path={} current_pos={} seek_to={} status={:?}",
+            self.path(),
+            self.pos,
+            pos,
+            self.status
+        );
+
         let res: FsResult<()> = {
             let (tx, rx) = CallChannel::channel();
 
+            info!(
+                "[FS_WRITER_BUFFER_SEEK_SEND_TASK] path={} seek_to={} sending_task_to_background",
+                self.path(),
+                pos
+            );
+
             if let Err(e) = self.task_sender.send(WriterTask::Seek((pos, tx))).await {
+                info!(
+                    "[FS_WRITER_BUFFER_SEEK_SEND_ERROR] path={} seek_to={} error={}",
+                    self.path(),
+                    pos,
+                    e
+                );
                 return Err(e.into());
             }
 
+            info!(
+                "[FS_WRITER_BUFFER_SEEK_WAIT_RESPONSE] path={} seek_to={} waiting_for_background_task",
+                self.path(),
+                pos
+            );
+
             if let Err(e) = rx.receive().await {
+                info!(
+                    "[FS_WRITER_BUFFER_SEEK_RECEIVE_ERROR] path={} seek_to={} error={}",
+                    self.path(),
+                    pos,
+                    e
+                );
                 return Err(e.into());
             }
+
+            info!(
+                "[FS_WRITER_BUFFER_SEEK_BACKGROUND_SUCCESS] path={} seek_to={} background_task_completed",
+                self.path(),
+                pos
+            );
             Ok(())
         };
 
         // Update position (note: actual seek is executed by background task)
         if res.is_ok() {
             self.pos = pos;
+            info!(
+                "[FS_WRITER_BUFFER_SEEK_UPDATE_POS] path={} updated_local_pos={}",
+                self.path(),
+                pos
+            );
         }
 
         match res {
-            Err(e) => Err(self.check_error(e)),
-            Ok(_) => Ok(()),
+            Err(e) => {
+                let checked_error = self.check_error(e);
+                info!(
+                    "[FS_WRITER_BUFFER_SEEK_ERROR] path={} seek_to={} final_error={}",
+                    self.path(),
+                    pos,
+                    checked_error
+                );
+                Err(checked_error)
+            }
+            Ok(_) => {
+                info!(
+                    "[FS_WRITER_BUFFER_SEEK_SUCCESS] path={} seek_to={} completed_successfully",
+                    self.path(),
+                    pos
+                );
+                Ok(())
+            }
         }
     }
 
@@ -228,17 +287,73 @@ impl FsWriterBuffer {
                     }
 
                     WriterTask::Seek((pos, tx)) => {
+                        info!(
+                            "[FS_WRITER_BUFFER_TASK_SEEK_START] path={} seek_to={} current_writer_pos={} processing_buffered_data",
+                            writer.path(),
+                            pos,
+                            writer.pos()
+                        );
+
                         // Process all buffered data first
+                        let mut buffered_chunks = 0;
+                        let mut buffered_bytes = 0;
                         while let Some(chunk) = chunk_receiver.try_recv()? {
+                            buffered_chunks += 1;
+                            buffered_bytes += chunk.len();
                             writer.write(chunk).await?
                         }
 
+                        info!(
+                            "[FS_WRITER_BUFFER_TASK_SEEK_BUFFERED] path={} seek_to={} processed_chunks={} processed_bytes={} new_writer_pos={}",
+                            writer.path(),
+                            pos,
+                            buffered_chunks,
+                            buffered_bytes,
+                            writer.pos()
+                        );
+
                         // Execute seek operation
-                        writer.seek(pos).await?;
+                        info!(
+                            "[FS_WRITER_BUFFER_TASK_SEEK_EXECUTE] path={} seek_to={} executing_writer_seek",
+                            writer.path(),
+                            pos
+                        );
+
+                        match writer.seek(pos).await {
+                            Ok(_) => {
+                                info!(
+                                    "[FS_WRITER_BUFFER_TASK_SEEK_WRITER_SUCCESS] path={} seek_to={} writer_seek_completed new_pos={}",
+                                    writer.path(),
+                                    pos,
+                                    writer.pos()
+                                );
+                            }
+                            Err(e) => {
+                                info!(
+                                    "[FS_WRITER_BUFFER_TASK_SEEK_WRITER_ERROR] path={} seek_to={} writer_seek_failed error={}",
+                                    writer.path(),
+                                    pos,
+                                    e
+                                );
+                                return Err(e);
+                            }
+                        }
 
                         if let Err(e) = tx.send(1) {
+                            info!(
+                                "[FS_WRITER_BUFFER_TASK_SEEK_RESPONSE_ERROR] path={} seek_to={} failed_to_send_response error={}",
+                                writer.path(),
+                                pos,
+                                e
+                            );
                             return Err(e.into());
                         }
+
+                        info!(
+                            "[FS_WRITER_BUFFER_TASK_SEEK_COMPLETE] path={} seek_to={} task_completed_successfully",
+                            writer.path(),
+                            pos
+                        );
                     }
                 },
 

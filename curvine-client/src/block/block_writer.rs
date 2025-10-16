@@ -110,12 +110,28 @@ impl WriterAdapter {
         let conf = &fs_context.conf.client;
         let short_circuit = conf.short_circuit && fs_context.is_local_worker(worker_addr);
 
+        info!(
+            "[WRITER_ADAPTER_CREATE] block_id={} worker={:?} short_circuit={} block_len={}",
+            located_block.block.id,
+            worker_addr,
+            short_circuit,
+            located_block.block.len
+        );
+
         let adapter = if short_circuit {
+            info!(
+                "[WRITER_ADAPTER_LOCAL] block_id={} creating_local_writer",
+                located_block.block.id
+            );
             let writer =
                 BlockWriterLocal::new(fs_context, located_block.block.clone(), worker_addr.clone())
                     .await?;
             Local(writer)
         } else {
+            info!(
+                "[WRITER_ADAPTER_REMOTE] block_id={} creating_remote_writer",
+                located_block.block.id
+            );
             let writer = BlockWriterRemote::new(
                 &fs_context,
                 located_block.block.clone(),
@@ -124,6 +140,13 @@ impl WriterAdapter {
             .await?;
             Remote(writer)
         };
+
+        info!(
+            "[WRITER_ADAPTER_CREATED] block_id={} worker={:?} type={}",
+            located_block.block.id,
+            worker_addr,
+            if short_circuit { "local" } else { "remote" }
+        );
 
         Ok(adapter)
     }
@@ -137,12 +160,30 @@ pub struct BlockWriter {
 
 impl BlockWriter {
     pub async fn new(fs_context: Arc<FsContext>, locate: LocatedBlock) -> FsResult<Self> {
+        info!(
+            "[BLOCK_WRITER_CREATE] block_id={} workers_count={} block_len={} replicas={}",
+            locate.block.id,
+            locate.locs.len(),
+            locate.block.len,
+            locate.locs.len()
+        );
+
         if locate.locs.is_empty() {
+            info!(
+                "[BLOCK_WRITER_ERROR] block_id={} no_available_workers",
+                locate.block.id
+            );
             return err_box!("There is no available worker");
         }
 
         let mut inners = Vec::with_capacity(locate.locs.len());
-        for addr in &locate.locs {
+        for (i, addr) in locate.locs.iter().enumerate() {
+            info!(
+                "[BLOCK_WRITER_ADAPTER] block_id={} replica_{} worker={:?}",
+                locate.block.id,
+                i,
+                addr
+            );
             let adapter = WriterAdapter::new(fs_context.clone(), &locate, addr).await?;
             inners.push(adapter);
         }
@@ -152,6 +193,15 @@ impl BlockWriter {
             locate,
             fs_context,
         };
+
+        info!(
+            "[BLOCK_WRITER_CREATED] block_id={} adapters_count={} pos={} len={}",
+            writer.locate.block.id,
+            writer.inners.len(),
+            writer.pos(),
+            writer.len()
+        );
+
         Ok(writer)
     }
 
@@ -276,6 +326,14 @@ impl BlockWriter {
     }
 
     pub async fn cancel(&mut self) -> FsResult<()> {
+        info!(
+            "[BLOCK_WRITER_CANCEL] block_id={} pos={} len={} workers={}",
+            self.block_id(),
+            self.pos(),
+            self.len(),
+            self.inners.len()
+        );
+
         let mut futures = Vec::with_capacity(self.inners.len());
         for writer in self.inners.iter_mut() {
             let task = async move {
@@ -288,9 +346,20 @@ impl BlockWriter {
         }
 
         if let Err((worker_addr, e)) = try_join_all(futures).await {
+            info!(
+                "[BLOCK_WRITER_CANCEL_ERROR] block_id={} worker={:?} error={}",
+                self.block_id(),
+                worker_addr,
+                e
+            );
             self.fs_context.add_failed_worker(&worker_addr);
             return Err(e);
         }
+
+        info!(
+            "[BLOCK_WRITER_CANCEL_SUCCESS] block_id={} cancelled",
+            self.block_id()
+        );
         Ok(())
     }
 
