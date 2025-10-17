@@ -30,7 +30,7 @@ pub struct FsWriterBase {
     path: Path,
     pos: i64,
     status: FileStatus,
-    file_blocks: Option<SearchFileBlocks>,
+    file_blocks: SearchFileBlocks,
 
     // Block management
     last_block: Option<LocatedBlock>,
@@ -62,13 +62,20 @@ impl FsWriterBase {
         let close_writer_limit = fs_context.conf.client.close_writer_limit;
 
         let initial_len = status.len;
+        
+        // Create empty file_blocks for new files
+        let empty_file_blocks = FileBlocks {
+            status: status.clone(),
+            block_locs: Vec::new(),
+        };
+        
         Self {
             fs_context,
             fs_client,
             pos: initial_len,
             path,
             status,
-            file_blocks: None, // New file, no block information
+            file_blocks: SearchFileBlocks::new(empty_file_blocks),
             last_block,
             cur_writer: None,
             pending_commit_block: None,
@@ -98,7 +105,7 @@ impl FsWriterBase {
             pos: initial_len,
             path,
             status,
-            file_blocks: Some(SearchFileBlocks::new(file_blocks)), // Support random writes
+            file_blocks: SearchFileBlocks::new(file_blocks), // Support random writes
             last_block,
             cur_writer: None,
             pending_commit_block: None,
@@ -147,30 +154,23 @@ impl FsWriterBase {
             locs,
         };
 
-        if let Some(ref mut file_blocks) = self.file_blocks {
-            // Add block to existing file_blocks
-            let mut file_blocks_data = FileBlocks {
-                status: file_blocks.status.clone(),
-                block_locs: file_blocks.block_locs.clone(),
-            };
-            file_blocks_data.block_locs.push(new_located_block);
+        // Add block to file_blocks (always exists now)
+        let mut file_blocks_data = FileBlocks {
+            status: self.file_blocks.status.clone(),
+            block_locs: self.file_blocks.block_locs.clone(),
+        };
+        file_blocks_data.block_locs.push(new_located_block.clone());
 
-            // Update file_blocks
-            *file_blocks = SearchFileBlocks::new(file_blocks_data);
-        } else {
-            // Create new file_blocks
-            let file_blocks_data = FileBlocks {
-                status: self.status.clone(),
-                block_locs: vec![new_located_block],
-            };
-
-            self.file_blocks = Some(SearchFileBlocks::new(file_blocks_data));
-        }
+        // Update file_blocks
+        self.file_blocks = SearchFileBlocks::new(file_blocks_data);
+        
+        // Update last_block to the newly added block
+        self.last_block = Some(new_located_block);
     }
 
     // Calculate correct file length (support random write and file holes)
     fn calculate_file_length(&self) -> i64 {
-        if self.file_blocks.is_some() {
+        if !self.file_blocks.block_locs.is_empty() {
             // Existing file: calculate length based on file_blocks
             self.calculate_length_from_blocks()
         } else {
@@ -181,12 +181,11 @@ impl FsWriterBase {
 
     // Calculate file length based on file_blocks
     fn calculate_length_from_blocks(&self) -> i64 {
-        if let Some(file_blocks) = &self.file_blocks {
-            let block_size = self.fs_context.block_size();
-            let mut max_written_pos = 0i64;
+        let block_size = self.fs_context.block_size();
+        let mut max_written_pos = 0i64;
 
-            // Iterate through all blocks, calculate max position using actual write ranges
-            for (i, block) in file_blocks.block_locs.iter().enumerate() {
+        // Iterate through all blocks, calculate max position using actual write ranges
+        for (i, block) in self.file_blocks.block_locs.iter().enumerate() {
                 let block_start = i as i64 * block_size;
                 let block_id = block.block.id;
 
@@ -201,13 +200,8 @@ impl FsWriterBase {
                 }
             }
 
-            // Consider max_written_pos (may include newly allocated blocks not in file_blocks)
-
-            max_written_pos.max(self.max_written_pos)
-        } else {
-            // If no file_blocks, fall back to position-based calculation
-            self.calculate_length_from_position()
-        }
+        // Consider max_written_pos (may include newly allocated blocks not in file_blocks)
+        max_written_pos.max(self.max_written_pos)
     }
 
     // Calculate file length based on write position (new file scenario)
@@ -237,84 +231,59 @@ impl FsWriterBase {
             completed_writers.push(block_id);
         }
 
-        // 3. Find the block with maximum block ID as the last block
-        let last_block_id = self.find_max_block_id()?;
-
-        match last_block_id {
-            Some(block_id) => {
-                // Create CommitBlock for the last block
-                let commit_block = self.create_commit_block_for_last_block(block_id)?;
-                Ok(Some(commit_block))
-            }
-            None => Ok(None),
+        // 3. Use the maintained last_block directly
+        if let Some(ref last_block) = self.last_block {
+            let block_id = last_block.block.id;
+            let commit_block = self.create_commit_block_for_last_block(block_id)?;
+            Ok(Some(commit_block))
+        } else {
+            // No last_block maintained means empty file, no commit needed
+            Ok(None)
         }
     }
 
-    fn find_max_block_id(&self) -> FsResult<Option<i64>> {
-        let mut max_block_id = None;
-
-        // Check file_blocks first (existing blocks)
-        if let Some(file_blocks) = &self.file_blocks {
-            for located_block in &file_blocks.block_locs {
-                let block_id = located_block.block.id;
-                max_block_id = Some(
-                    max_block_id.map_or(block_id, |current_max: i64| current_max.max(block_id)),
-                );
-            }
-        }
-
-        // Also check block_write_ranges for any newly allocated blocks not yet in file_blocks
-        for &block_id in self.block_write_ranges.keys() {
-            max_block_id =
-                Some(max_block_id.map_or(block_id, |current_max: i64| current_max.max(block_id)));
-        }
-
-        Ok(max_block_id)
-    }
 
     fn create_commit_block_for_last_block(
         &self,
         block_id: i64,
     ) -> FsResult<curvine_common::state::CommitBlock> {
         // Try to get block info from file_blocks first
-        if let Some(file_blocks) = &self.file_blocks {
-            for located_block in &file_blocks.block_locs {
-                if located_block.block.id == block_id {
-                    // Calculate the actual block length based on write ranges
-                    let block_len =
-                        if let Some((_start, end)) = self.block_write_ranges.get(&block_id) {
-                            // Use actual written length
-                            let block_size = self.fs_context.block_size();
-                            let block_start = self.get_block_position(block_id);
-                            (*end - block_start).min(block_size)
+        for located_block in &self.file_blocks.block_locs {
+            if located_block.block.id == block_id {
+                // Calculate the actual block length based on write ranges
+                let block_len =
+                    if let Some((_start, end)) = self.block_write_ranges.get(&block_id) {
+                        // Use actual written length
+                        let block_size = self.fs_context.block_size();
+                        let block_start = self.get_block_position(block_id);
+                        (*end - block_start).min(block_size)
+                    } else {
+                        // Fallback: use max_written_pos if this block overlaps with written area
+                        let block_size = self.fs_context.block_size();
+                        let block_start = self.get_block_position(block_id);
+
+                        if self.max_written_pos > block_start {
+                            (self.max_written_pos - block_start).min(block_size)
                         } else {
-                            // Fallback: use max_written_pos if this block overlaps with written area
-                            let block_size = self.fs_context.block_size();
-                            let block_start = self.get_block_position(block_id);
-
-                            if self.max_written_pos > block_start {
-                                (self.max_written_pos - block_start).min(block_size)
-                            } else {
-                                // Use the block's recorded length from file_blocks
-                                located_block.block.len
-                            }
-                        };
-
-                    // Convert worker addresses to block locations
-                    let locations = located_block
-                        .locs
-                        .iter()
-                        .map(|addr| curvine_common::state::BlockLocation::with_id(addr.worker_id))
-                        .collect();
-
-                    let commit_block = curvine_common::state::CommitBlock {
-                        block_id,
-                        block_len,
-                        locations,
+                            // Use the block's recorded length from file_blocks
+                            located_block.block.len
+                        }
                     };
 
-                    return Ok(commit_block);
-                }
+                // Convert worker addresses to block locations
+                let locations = located_block
+                    .locs
+                    .iter()
+                    .map(|addr| curvine_common::state::BlockLocation::with_id(addr.worker_id))
+                    .collect();
+
+                let commit_block = curvine_common::state::CommitBlock {
+                    block_id,
+                    block_len,
+                    locations,
+                };
+
+                return Ok(commit_block);
             }
         }
 
@@ -338,15 +307,13 @@ impl FsWriterBase {
 
     // Get block position in file (for sorting)
     fn get_block_position(&self, block_id: i64) -> i64 {
-        if let Some(file_blocks) = &self.file_blocks {
-            let block_size = self.fs_context.block_size();
+        let block_size = self.fs_context.block_size();
 
-            // Find block index in file_blocks
-            for (i, located_block) in file_blocks.block_locs.iter().enumerate() {
-                if located_block.block.id == block_id {
-                    let position = i as i64 * block_size;
-                    return position;
-                }
+        // Find block index in file_blocks
+        for (i, located_block) in self.file_blocks.block_locs.iter().enumerate() {
+            if located_block.block.id == block_id {
+                let position = i as i64 * block_size;
+                return position;
             }
         }
 
@@ -509,11 +476,9 @@ impl FsWriterBase {
             Some(v) if v.has_remaining() => {}
 
             _ => {
-                if let Some(_v) = &self.cur_writer {}
-
-                let (_block_off, lb) = if let Some(file_blocks) = &self.file_blocks {
+                let (_block_off, lb) = if !self.file_blocks.block_locs.is_empty() {
                     // Try to find in existing file blocks
-                    match file_blocks.get_write_block(self.pos) {
+                    match self.file_blocks.get_write_block(self.pos) {
                         Ok((block_off, located_block)) => {
                             // Found existing block, check if there's a cached writer
                             let new_writer = match self.all_writers.remove(&located_block.block.id)
@@ -543,38 +508,8 @@ impl FsWriterBase {
                         }
                     }
                 } else {
-                    // Even for new files, some blocks may have been allocated, check file_blocks
-                    if let Some(file_blocks) = &self.file_blocks {
-                        match file_blocks.get_write_block(self.pos) {
-                            Ok((block_off, located_block)) => {
-                                // Check cached writer
-                                let new_writer =
-                                    match self.all_writers.remove(&located_block.block.id) {
-                                        Some(mut cached_writer) => {
-                                            cached_writer.seek(block_off).await?;
-                                            cached_writer
-                                        }
-                                        None => {
-                                            let mut corrected_block = located_block.clone();
-                                            corrected_block.block.len = 0;
-                                            let mut new_writer = BlockWriter::new(
-                                                self.fs_context.clone(),
-                                                corrected_block,
-                                            )
-                                            .await?;
-                                            new_writer.seek(block_off).await?;
-                                            new_writer
-                                        }
-                                    };
-
-                                (block_off, new_writer)
-                            }
-                            Err(_) => self.allocate_new_block().await?,
-                        }
-                    } else {
-                        // Truly new file, allocate first block
-                        self.allocate_new_block().await?
-                    }
+                    // New file, allocate first block
+                    self.allocate_new_block().await?
                 };
 
                 // Update current writer
@@ -598,16 +533,10 @@ impl FsWriterBase {
         };
 
         // Allocate new block
-        let lb = if let Some(lb) = self.last_block.take() {
-            lb
-        } else {
-            let located_block = self
-                .fs_client
-                .add_block(&self.path, commit_block, &self.fs_context.client_addr)
-                .await?;
-
-            located_block
-        };
+        let lb = self
+            .fs_client
+            .add_block(&self.path, commit_block, &self.fs_context.client_addr)
+            .await?;
 
         let writer = BlockWriter::new(self.fs_context.clone(), lb.clone()).await?;
 
