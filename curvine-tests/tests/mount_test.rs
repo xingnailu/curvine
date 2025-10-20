@@ -29,7 +29,9 @@ use std::sync::Arc;
 fn mount_test() -> CommonResult<()> {
     Logger::default();
     // Create a test cluster configuration
-    let cluster_conf = Testing::get_cluster_conf()?;
+    let testing = Testing::builder().default().build()?;
+    testing.start_cluster()?;
+    let cluster_conf = testing.get_active_cluster_conf()?;
     println!("cluster_conf: {:?}", cluster_conf);
 
     // Create a test cluster configuration
@@ -205,7 +207,7 @@ fn mount_test() -> CommonResult<()> {
         info!("UmountResp: {:?}", umount_resp);
         assert!(umount_resp.is_err(), "{}", umount_resp.unwrap_err());
 
-        let invalid_mnt_path = "b/c".into();
+        let invalid_mnt_path = "/b/c".into();
         let umount_resp = client.umount(&invalid_mnt_path).await;
         info!("UmountResp: {:?}", umount_resp);
         assert!(umount_resp.is_err(), "{}", umount_resp.unwrap_err());
