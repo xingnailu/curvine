@@ -16,7 +16,7 @@ use once_cell::sync::Lazy;
 use prometheus::core::{
     AtomicI64, Collector, GenericCounter, GenericCounterVec, GenericGauge, GenericGaugeVec,
 };
-use prometheus::{default_registry, Encoder, Opts, Registry, TextEncoder};
+use prometheus::{default_registry, Encoder, HistogramOpts, Opts, Registry, TextEncoder};
 
 use crate::sync::FastDashMap;
 use crate::{err_box, CommonResult};
@@ -25,6 +25,8 @@ pub type Counter = GenericCounter<AtomicI64>;
 pub type CounterVec = GenericCounterVec<AtomicI64>;
 pub type Gauge = GenericGauge<AtomicI64>;
 pub type GaugeVec = GenericGaugeVec<AtomicI64>;
+pub type Histogram = prometheus::Histogram;
+pub type HistogramVec = prometheus::HistogramVec;
 
 static METRICS_MAP: Lazy<FastDashMap<String, Metrics>> = Lazy::new(FastDashMap::default);
 
@@ -34,6 +36,8 @@ pub enum Metrics {
     CounterVec(CounterVec),
     Gauge(Gauge),
     GaugeVec(GaugeVec),
+    Histogram(Histogram),
+    HistogramVec(HistogramVec),
 }
 
 impl Metrics {
@@ -43,6 +47,8 @@ impl Metrics {
             Metrics::CounterVec(v) => Box::new(v.clone()),
             Metrics::Gauge(v) => Box::new(v.clone()),
             Metrics::GaugeVec(v) => Box::new(v.clone()),
+            Metrics::Histogram(v) => Box::new(v.clone()),
+            Metrics::HistogramVec(v) => Box::new(v.clone()),
         }
     }
 
@@ -52,6 +58,8 @@ impl Metrics {
             Metrics::CounterVec(v) => &v.desc()[0].fq_name,
             Metrics::Gauge(v) => &v.desc()[0].fq_name,
             Metrics::GaugeVec(v) => &v.desc()[0].fq_name,
+            Metrics::Histogram(v) => &v.desc()[0].fq_name,
+            Metrics::HistogramVec(v) => &v.desc()[0].fq_name,
         }
     }
 
@@ -97,6 +105,50 @@ impl Metrics {
         Ok(g)
     }
 
+    pub fn new_histogram<T: Into<String>>(name: T, help: T) -> CommonResult<Histogram> {
+        let h = Histogram::with_opts(HistogramOpts::new(name, help))?;
+        Self::register(Self::Histogram(h.clone()))?;
+        Ok(h)
+    }
+
+    pub fn new_histogram_with_buckets<T: Into<String>>(
+        name: T,
+        help: T,
+        buckets: &[f64],
+    ) -> CommonResult<Histogram> {
+        let mut opts = HistogramOpts::new(name, help);
+        opts.buckets = buckets.to_vec();
+        let h = Histogram::with_opts(opts)?;
+        Self::register(Self::Histogram(h.clone()))?;
+        Ok(h)
+    }
+
+    pub fn new_histogram_vec<T: Into<String>>(
+        name: T,
+        help: T,
+        label_names: &[&str],
+    ) -> CommonResult<HistogramVec> {
+        let opts = HistogramOpts::new(name, help).buckets(vec![
+            10.0, 50.0, 100.0, 500.0, 1000.0, 5000.0, 10000.0, 50000.0, 100000.0,
+        ]);
+        let h = HistogramVec::new(opts, label_names)?;
+        Self::register(Self::HistogramVec(h.clone()))?;
+        Ok(h)
+    }
+
+    pub fn new_histogram_vec_with_buckets<T: Into<String>>(
+        name: T,
+        help: T,
+        label_names: &[&str],
+        buckets: &[f64],
+    ) -> CommonResult<HistogramVec> {
+        let mut opts = HistogramOpts::new(name, help);
+        opts.buckets = buckets.to_vec();
+        let h = HistogramVec::new(opts, label_names)?;
+        Self::register(Self::HistogramVec(h.clone()))?;
+        Ok(h)
+    }
+
     pub fn text_output() -> CommonResult<String> {
         let mut buffer = Vec::new();
         let encoder = TextEncoder::new();
@@ -121,6 +173,13 @@ impl Metrics {
             _ => err_box!("Not CounterVec"),
         }
     }
+
+    pub fn try_into_histogram_vec(self) -> CommonResult<HistogramVec> {
+        match self {
+            Metrics::HistogramVec(v) => Ok(v),
+            _ => err_box!("Not HistogramVec"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,14 +192,24 @@ mod test {
         let counter_vec = Metrics::new_counter_vec("m2", "m2", &["l1"]).unwrap();
         let gauge = Metrics::new_gauge("g1", "g1").unwrap();
         let gauge_vec = Metrics::new_gauge_vec("g2", "g2", &["l2"]).unwrap();
+        let histogram = Metrics::new_histogram("h1", "h1").unwrap();
+        let histogram_vec = Metrics::new_histogram_vec("h2", "h2", &["l3"]).unwrap();
 
         counter.inc_by(100);
         counter_vec.with_label_values(&["v1"]).inc();
         gauge.set(1000);
         gauge_vec.with_label_values(&["v2"]).set(2000);
+        histogram.observe(1.5);
+        histogram_vec.with_label_values(&["v3"]).observe(2.5);
 
         assert_eq!(counter.get(), 100);
         assert_eq!(gauge.get(), 1000);
+        assert_eq!(histogram.get_sample_count(), 1);
+        assert_eq!(histogram.get_sample_sum(), 1.5);
+
+        let histogram_instance = histogram_vec.with_label_values(&["v3"]);
+        assert_eq!(histogram_instance.get_sample_count(), 1);
+        assert_eq!(histogram_instance.get_sample_sum(), 2.5);
 
         let output = Metrics::text_output().unwrap();
         println!("output = {}", output);
