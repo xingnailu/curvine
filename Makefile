@@ -37,6 +37,7 @@ help:
 	@echo "  make csi-build                   - Build curvine-csi Go binary"
 	@echo "  make csi-run                     - Run curvine-csi from source"
 	@echo "  make csi-docker-build            - Build curvine-csi Docker image"
+	@echo "  make csi-docker-multiarch        - Build curvine-csi Docker image for multiple architectures (amd64, arm64)"
 	@echo "  make csi-docker-push             - Push curvine-csi Docker image"
 	@echo "  make csi-docker                  - Build and push curvine-csi Docker image"
 	@echo "  make csi-docker-fast             - Build curvine-csi Docker image quickly (no push)"
@@ -108,7 +109,7 @@ docker-compile:
 	docker run --rm --entrypoint="" -v $(PWD):/workspace -w /workspace curvine/curvine-compile:build-cached bash -c "make all"
 
 # 8. CSI (Container Storage Interface) targets - delegate to curvine-csi/Makefile
-.PHONY: csi-build csi-run csi-fmt csi-vet csi-docker-build csi-docker-push csi-docker csi-docker-fast
+.PHONY: csi-build csi-run csi-fmt csi-vet csi-docker-build csi-docker-push csi-docker csi-docker-fast csi-docker-multiarch
 
 # Build curvine-csi Go binary
 csi-build:
@@ -134,6 +135,15 @@ csi-vet:
 csi-docker-build:
 	@echo "Building curvine-csi Docker image..."
 	docker build --build-arg GOPROXY=https://goproxy.cn,direct -t curvine-csi:latest -f curvine-csi/Dockerfile .
+
+# Build curvine-csi Docker image for multiple architectures
+csi-docker-multiarch:
+	@echo "Building curvine-csi Docker image for multiple architectures..."
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		--build-arg GOPROXY=https://goproxy.cn,direct \
+		-t curvine-csi:latest \
+		-f curvine-csi/Dockerfile . \
+		--push
 
 # Push curvine-csi Docker image
 csi-docker-push:

@@ -1,6 +1,7 @@
 FROM ubuntu:24.04 AS builder
 
 ARG GOPROXY
+ARG TARGETARCH
 
 RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list && \
@@ -11,9 +12,15 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/source
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget -O go1.23.linux-amd64.tar.gz https://go.dev/dl/go1.23.4.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.23.linux-amd64.tar.gz && \
-    rm go1.23.linux-amd64.tar.gz
+# 根据目标架构下载对应的 Go 版本
+RUN case ${TARGETARCH} in \
+        "amd64") GOARCH=amd64 ;; \
+        "arm64") GOARCH=arm64 ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    wget -O go1.23.linux-${GOARCH}.tar.gz https://go.dev/dl/go1.23.4.linux-${GOARCH}.tar.gz && \
+    tar -C /usr/local -xzf go1.23.linux-${GOARCH}.tar.gz && \
+    rm go1.23.linux-${GOARCH}.tar.gz
 
 ENV PATH=/usr/local/go/bin:$PATH
 ENV GOPATH=/go
